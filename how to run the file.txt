@@ -1,0 +1,4 @@
+
+how to run that file type that in terminal
+
+& "C:/Users/Christian Aring/AppData/Local/Python/pythoncore-3.14-64/python.exe" app.py

@@ -1,0 +1,897 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Lead Revalidation Tool</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; font-family: 'Inter', sans-serif; background: #f0f2f5; color: #1a1a1a; font-size: 18px; }
+
+    .topbar { height: 44px; background: #fff; border-bottom: 1px solid #e0e0e0; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; }
+    .topbar-logo { font-size: 0.88rem; font-weight: 700; color: #1a1a1a; }
+    .topbar-logo span { color: #bbb; font-weight: 400; }
+    .topbar-right { display: flex; align-items: center; gap: 10px; }
+    .progress-text { font-size: 0.75rem; color: #999; }
+
+    /* Login */
+    .login-screen { display: none; flex-direction: column; align-items: center; justify-content: center; height: 100vh; gap: 12px; }
+    .login-box { background: #fff; border: 1px solid #e0e0e0; border-radius: 10px; padding: 32px 40px; width: 320px; display: flex; flex-direction: column; gap: 14px; }
+    .login-box h2 { font-size: 0.95rem; font-weight: 700; color: #1a1a1a; margin-bottom: 4px; }
+    .login-field { display: flex; flex-direction: column; gap: 4px; }
+    .login-field label { font-size: 0.65rem; font-weight: 600; color: #aaa; text-transform: uppercase; letter-spacing: 0.4px; }
+    .login-field input { background: #fafafa; border: 1px solid #e0e0e0; border-radius: 5px; padding: 8px 10px; font-size: 0.85rem; color: #1a1a1a; font-family: inherit; outline: none; }
+    .login-field input:focus { border-color: #bbb; background: #fff; }
+    .login-err { font-size: 0.72rem; color: #ea4335; display: none; }
+    .login-btn { background: #1a1a1a; color: #fff; border: none; border-radius: 5px; padding: 9px; font-size: 0.82rem; font-weight: 700; cursor: pointer; font-family: inherit; }
+    .login-btn:hover { opacity: 0.85; }
+    .logout-btn { display: none; padding: 4px 14px; background: transparent; border: none; border-radius: 3px; font-size: 0.75rem; font-weight: 600; color: #aaa; cursor: pointer; font-family: inherit; }
+    .logout-btn:hover { color: #ea4335; }
+    .tab-btns { display: flex; background: #f0f2f5; border-radius: 5px; padding: 2px; gap: 2px; }
+    .tab-btn { padding: 4px 14px; border: none; border-radius: 3px; cursor: pointer; font-size: 0.75rem; font-weight: 600; background: transparent; color: #aaa; font-family: inherit; transition: all 0.15s; }
+    .tab-btn.active { background: #fff; color: #1a1a1a; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+
+    .pbar-wrap { height: 3px; background: #e8e8e8; }
+    .pbar { height: 3px; background: #1a1a1a; width: 0%; transition: width 0.3s; }
+
+    .home-screen { display: flex; flex-direction: column; height: calc(100vh - 47px); overflow-y: auto; padding: 24px 32px; gap: 20px; }
+    .home-top { display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+    .home-top h2 { font-size: 0.88rem; font-weight: 700; color: #1a1a1a; }
+    .upload-btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 16px; background: #1a1a1a; color: #fff; border: none; border-radius: 5px; font-size: 0.78rem; font-weight: 600; cursor: pointer; font-family: inherit; }
+    .upload-btn:hover { opacity: 0.85; }
+    .history-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+    .history-card { background: #fff; border: 1px solid #e8e8e8; border-radius: 8px; padding: 14px 16px; cursor: pointer; transition: box-shadow 0.15s; }
+    .history-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    .hc-name { font-size: 0.82rem; font-weight: 700; color: #1a1a1a; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .hc-bar-wrap { height: 4px; background: #f0f0f0; border-radius: 2px; margin-bottom: 6px; }
+    .hc-bar { height: 4px; background: #34a853; border-radius: 2px; transition: width 0.3s; }
+    .hc-meta { display: flex; justify-content: space-between; font-size: 0.68rem; color: #aaa; }
+    .hc-empty { font-size: 0.8rem; color: #bbb; text-align: center; padding: 40px 0; }
+    .upload-screen { display: none; flex-direction: column; align-items: center; justify-content: center; height: calc(100vh - 47px); gap: 12px; }
+    .upload-box { border: 1.5px dashed #ccc; border-radius: 10px; padding: 36px 56px; text-align: center; cursor: pointer; background: #fff; transition: border-color 0.2s; }
+    .upload-box:hover { border-color: #999; background: #fafafa; }
+    .upload-box input { display: none; }
+    .upload-box strong { font-size: 0.88rem; color: #333; display: block; margin: 6px 0 3px; }
+    .upload-box p { font-size: 0.75rem; color: #aaa; }
+
+    .app { display: flex; height: calc(100vh - 47px); }
+    .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; padding: 10px 12px; gap: 7px; }
+
+    .namebar { display: flex; align-items: center; gap: 8px; background: #fff; border: 1px solid #e0e0e0; border-radius: 6px; padding: 6px 12px; flex-shrink: 0; }
+    .namebar label { font-size: 0.7rem; font-weight: 600; color: #aaa; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; }
+    .namebar input { background: transparent; border: none; color: #1a1a1a; font-size: 0.82rem; font-family: inherit; outline: none; flex: 1; }
+    .namebar input::placeholder { color: #ccc; }
+
+    .card { background: #fff; border: 1px solid #e8e8e8; border-radius: 8px; padding: 12px 14px; flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
+
+    .co-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 10px; flex-shrink: 0; }
+    .co-name { font-size: 1rem; font-weight: 700; color: #1a1a1a; line-height: 1.2; }
+    .co-url { font-size: 0.7rem; color: #bbb; text-decoration: none; display: block; margin-top: 2px; }
+    .co-url:hover { color: #666; }
+
+    .body-cols { display: flex; gap: 12px; flex: 1; min-height: 0; }
+    .col-left { flex: 1; display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+    .col-right { flex: 1; display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+
+    .sec-label { font-size: 0.65rem; font-weight: 700; color: #bbb; text-transform: uppercase; letter-spacing: 0.8px; padding-bottom: 5px; border-bottom: 1px solid #f0f0f0; margin-bottom: 5px; }
+
+    .g2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .g3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+
+    .f { display: flex; flex-direction: column; gap: 2px; position: relative; }
+    .f label { font-size: 0.65rem; font-weight: 600; color: #aaa; text-transform: uppercase; letter-spacing: 0.3px; }
+    .f input, .f textarea { background: #fafafa; border: 1px solid #e0e0e0; border-radius: 5px; padding: 5px 8px; font-size: 0.82rem; color: #1a1a1a; font-family: inherit; transition: border-color 0.15s; height: 28px; }
+    .f input:focus, .f textarea:focus { outline: none; border-color: #bbb; background: #fff; }
+    .f textarea { height: 100%; resize: none; padding-top: 5px; }
+    .f input::placeholder { color: #ccc; }
+    .hint { font-size: 0.65rem; line-height: 1; position: absolute; bottom: -13px; left: 0; white-space: nowrap; }
+    .ok { color: #34a853; } .err { color: #ea4335; }
+    .fv input { border-color: #34a853 !important; }
+    .fi input { border-color: #ea4335 !important; }
+
+    .srow { display: flex; gap: 5px; flex-wrap: wrap; }
+    .sb { padding: 4px 9px; border-radius: 4px; cursor: pointer; font-size: 0.68rem; font-weight: 600; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; border: 1px solid transparent; font-family: inherit; white-space: nowrap; }
+    .sb img { width: 12px; height: 12px; object-fit: contain; }
+    .sb:hover { opacity: 0.8; }
+    .sg  { background: #f5f5f5; border-color: #e0e0e0; color: #555; }
+    .sli { background: #0a66c2; color: #fff; }
+    .sap { background: #6b21a8; color: #fff; }
+    .sco { background: #c2410c; color: #fff; }
+    .sm  { background: #f5f5f5; border-color: #e0e0e0; color: #555; }
+
+    /* Rank badges (for sidebar/preview) */
+    .rank-badge { padding: 2px 8px; border-radius: 20px; font-size: 0.62rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; display: inline-block; }
+    .rank-bad    { background: #FFC000; color: #000; }
+    .rank-good   { background: #A8D08D; color: #000; }
+    .rank-better { background: #538135; color: #fff; }
+    .rank-best   { background: #375623; color: #fff; }
+
+    /* Rank pick buttons */
+    .rank-btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+    .rank-btn {
+      padding: 5px 16px; border-radius: 20px; font-size: 0.65rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer;
+      border: 2px solid transparent; font-family: inherit; transition: all 0.15s;
+      opacity: 0.35;
+    }
+    .rank-btn:hover { opacity: 0.65; }
+    .rank-btn.selected { opacity: 1; box-shadow: 0 0 0 2px #1a1a1a; }
+    .rank-btn.rb-bad    { background: #FFC000; color: #000; }
+    .rank-btn.rb-good   { background: #A8D08D; color: #000; }
+    .rank-btn.rb-better { background: #538135; color: #fff; }
+    .rank-btn.rb-best   { background: #375623; color: #fff; }
+
+    .rank-suggested { font-size: 0.65rem; color: #999; margin-bottom: 4px; }
+    .rank-reason { font-size: 0.65rem; color: #bbb; font-style: italic; margin-top: 4px; }
+
+    .actions { display: flex; gap: 6px; justify-content: flex-end; padding-top: 8px; border-top: 1px solid #f0f0f0; flex-shrink: 0; margin-top: auto; }
+    .btn { padding: 6px 16px; border: none; border-radius: 5px; font-size: 0.78rem; font-weight: 600; cursor: pointer; font-family: inherit; transition: opacity 0.15s; }
+    .btn:hover { opacity: 0.85; }
+    .b-ghost { background: #f5f5f5; color: #666; border: 1px solid #e0e0e0; }
+    .b-save  { background: #1a1a1a; color: #fff; font-weight: 700; }
+    .b-dl    { background: #f5f5f5; color: #666; border: 1px solid #e0e0e0; width: 100%; font-size: 0.72rem; padding: 6px; }
+
+    .sidebar { width: 210px; background: #fff; border-left: 1px solid #e8e8e8; display: flex; flex-direction: column; transition: width 0.2s, opacity 0.2s; overflow: hidden; flex-shrink: 0; }
+    .sidebar.hidden { width: 0; opacity: 0; pointer-events: none; }
+    .sb-head { padding: 9px 12px; border-bottom: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
+    .sb-head h3 { font-size: 0.65rem; font-weight: 700; color: #bbb; text-transform: uppercase; letter-spacing: 0.8px; }
+    .sb-stats { font-size: 0.7rem; color: #bbb; }
+    .sb-list { flex: 1; overflow-y: auto; }
+    .sb-list::-webkit-scrollbar { width: 3px; }
+    .sb-list::-webkit-scrollbar-thumb { background: #eee; }
+    .sb-item { padding: 7px 12px; border-bottom: 1px solid #f5f5f5; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: background 0.1s; }
+    .sb-item:hover { background: #fafafa; }
+    .sb-item.active { background: #f5f5f5; }
+    .sb-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+    .d-done { background: #34a853; } .d-pend { background: #ddd; }
+    .sb-item.rank-bad    { border-left: 3px solid #FFC000; }
+    .sb-item.rank-good   { border-left: 3px solid #A8D08D; }
+    .sb-item.rank-better { border-left: 3px solid #538135; }
+    .sb-item.rank-best   { border-left: 3px solid #375623; }
+    .sb-co { font-size: 0.75rem; font-weight: 500; color: #333; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sb-meta { font-size: 0.65rem; color: #bbb; margin-top: 2px; display: flex; align-items: center; gap: 3px; }
+    .sb-foot { padding: 8px 10px; border-top: 1px solid #f0f0f0; flex-shrink: 0; }
+
+    .toggle-btn { position: fixed; right: 0; top: 50%; transform: translateY(-50%); background: #fff; border: 1px solid #e0e0e0; border-right: none; color: #bbb; border-radius: 4px 0 0 4px; padding: 10px 5px; cursor: pointer; font-size: 0.58rem; z-index: 100; writing-mode: vertical-rl; letter-spacing: 1px; font-weight: 700; font-family: inherit; }
+    .toggle-btn:hover { color: #888; }
+
+    .preview-screen { display: none; flex-direction: column; height: calc(100vh - 47px); padding: 10px 12px; gap: 8px; }
+    .preview-toolbar { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+    .preview-toolbar input { background: #fff; border: 1px solid #e0e0e0; border-radius: 5px; padding: 6px 10px; font-size: 0.8rem; color: #1a1a1a; width: 240px; font-family: inherit; }
+    .preview-toolbar input:focus { outline: none; border-color: #bbb; }
+    .preview-toolbar input::placeholder { color: #ccc; }
+    .p-count { font-size: 0.72rem; color: #bbb; }
+    .table-wrap { flex: 1; overflow: auto; border: 1px solid #e8e8e8; border-radius: 6px; }
+    .table-wrap::-webkit-scrollbar { width: 4px; height: 4px; }
+    .table-wrap::-webkit-scrollbar-thumb { background: #e0e0e0; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.78rem; min-width: 1400px; }
+    thead tr { background: #fafafa; position: sticky; top: 0; z-index: 1; }
+    thead th { padding: 8px 10px; text-align: left; font-weight: 600; white-space: nowrap; font-size: 0.68rem; color: #aaa; text-transform: uppercase; letter-spacing: 0.4px; border-bottom: 1px solid #e8e8e8; }
+    tbody tr { border-bottom: 1px solid #f5f5f5; cursor: pointer; transition: filter 0.1s; }
+    tbody tr:hover { filter: brightness(0.97); }
+    tbody td { padding: 7px 10px; white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis; color: #555; }
+    tbody td:first-child { color: #ccc; }
+    .row-bad    { background: #FFC000; } .row-bad td    { color: #000 !important; }
+    .row-good   { background: #A8D08D; } .row-good td   { color: #000 !important; }
+    .row-better { background: #538135; } .row-better td { color: #fff !important; }
+    .row-best   { background: #375623; } .row-best td   { color: #fff !important; }
+
+    .done-screen { display: none; flex-direction: column; align-items: center; justify-content: center; height: calc(100vh - 47px); gap: 10px; }
+    .done-screen h2 { font-size: 1.2rem; font-weight: 700; color: #1a1a1a; }
+    .done-screen p { font-size: 0.8rem; color: #aaa; }
+
+    .spinner { display: none; position: fixed; inset: 0; background: rgba(255,255,255,0.8); z-index: 999; align-items: center; justify-content: center; flex-direction: column; gap: 8px; }
+    .spinner.on { display: flex; }
+    .spin { width: 24px; height: 24px; border: 2px solid #e0e0e0; border-top-color: #333; border-radius: 50%; animation: sp 0.7s linear infinite; }
+    .spinner p { font-size: 0.75rem; color: #aaa; }
+    @keyframes sp { to { transform: rotate(360deg); } }
+
+    .divider { height: 1px; background: #f0f0f0; margin: 2px 0; flex-shrink: 0; }
+  </style>
+</head>
+<body>
+
+<div class="spinner" id="spinner"><div class="spin"></div><p>Validating...</p></div>
+
+<div class="login-screen" id="loginScreen">
+  <div class="login-box">
+    <h2>Sign in to continue</h2>
+    <div class="login-field"><label>Username</label><input type="text" id="loginUser" placeholder="your username" autocomplete="username"/></div>
+    <div class="login-field"><label>Password</label><input type="password" id="loginPass" placeholder="••••••••" autocomplete="current-password"/></div>
+    <div class="login-err" id="loginErr">Invalid username or password</div>
+    <button class="login-btn" onclick="doLogin()">Sign In</button>
+  </div>
+</div>
+
+<div class="topbar">
+  <div class="topbar-logo">Revalidation <span>Tool</span></div>
+  <div class="topbar-right">
+    <button class="tab-btn" onclick="goHome()" style="font-size:0.75rem;font-weight:600;color:#aaa;background:none;border:none;cursor:pointer;font-family:inherit;">⌂ Home</button>
+    <div class="tab-btns" id="tabBtns" style="display:none">
+      <button class="tab-btn active" onclick="switchTab('validate')">Validate</button>
+      <button class="tab-btn" onclick="switchTab('preview')">Preview</button>
+    </div>
+    <span class="progress-text" id="progressText"></span>
+    <button class="logout-btn" id="userChip" onclick="doLogout()">Logout</button>
+  </div>
+</div>
+<div class="pbar-wrap"><div class="pbar" id="progressBar"></div></div>
+
+<div class="home-screen" id="homeScreen" style="display:flex">
+  <div class="home-top">
+    <h2>Recent Files</h2>
+    <button class="upload-btn" onclick="document.getElementById('fileInput').click()">+ Upload New File</button>
+    <input type="file" id="fileInput" accept=".xlsx" onchange="uploadFile(this)" style="display:none"/>
+  </div>
+  <div class="history-grid" id="historyGrid"><div class="hc-empty">Loading...</div></div>
+</div>
+
+<div class="upload-screen" id="uploadScreen">
+  <div style="font-size:0.9rem;font-weight:700;color:#1a1a1a">Lead Revalidation Tool</div>
+  <div class="upload-box" onclick="document.getElementById('fileInput').click()">
+    <div style="font-size:1.6rem">📂</div>
+    <strong>Click to upload .xlsx</strong>
+    <p>Your leads data file</p>
+  </div>
+</div>
+
+<div class="app" id="validatorScreen" style="display:none">
+  <div class="main">
+    <div class="namebar">
+      <label>Validated By</label>
+      <input type="text" id="validatedBy" placeholder="Your name" readonly style="cursor:default;color:#555"/>
+    </div>
+
+    <div class="card">
+      <div class="co-header">
+        <div style="flex:1;min-width:0">
+          <div class="co-name" id="companyName">—</div>
+          <a class="co-url" id="websiteLink" href="#" target="_blank" rel="noopener noreferrer"></a>
+        </div>
+        <div style="display:flex;gap:5px;align-items:flex-start">
+          <div class="f" style="width:160px"><label>Company</label><input type="text" id="CompanyInput" placeholder="e.g. Apollo"/></div>
+          <div class="f" style="width:140px"><label>Industry</label><input type="text" id="Industry" placeholder="e.g. Automotive"/></div>
+          <div class="f" style="width:100px"><label>Employees</label><input type="text" id="NumEmployees"/></div>
+          <div class="f" style="width:180px" id="f_Website"><label>Website</label><input type="text" id="Website"/><span class="hint" id="hint_website"></span></div>
+        </div>
+      </div>
+
+      <div class="body-cols">
+        <!-- LEFT -->
+        <div class="col-left">
+          <div>
+            <div class="sec-label">Contact Person</div>
+            <div class="g3" style="margin-bottom:16px">
+              <div class="f" id="f_FirstName"><label>First Name</label><input type="text" id="FirstName"/></div>
+              <div class="f" id="f_LastName"><label>Last Name</label><input type="text" id="LastName"/></div>
+              <div class="f" id="f_Title"><label>Title</label><input type="text" id="Title"/><span class="hint" id="hint_title"></span></div>
+            </div>
+            <div class="g2" style="margin-bottom:16px">
+              <div class="f" id="f_Email"><label>Email</label><input type="text" id="Email"/><span class="hint" id="hint_email"></span></div>
+              <div class="f" id="f_Phone"><label>Phone</label><input type="text" id="Phone"/><span class="hint" id="hint_phone"></span></div>
+            </div>
+            <div class="srow">
+              <a class="sb sg"  id="btn_google"     href="#" target="_blank" rel="noopener noreferrer"><img src="https://www.google.com/favicon.ico"/> Google</a>
+              <a class="sb sli" id="btn_linkedin"   href="#" target="_blank" rel="noopener noreferrer"><img src="https://static.licdn.com/sc/h/akt4ae504epesldzj74dzred8"/> LinkedIn</a>
+              <a class="sb sap" id="btn_apollo"     href="#" target="_blank" rel="noopener noreferrer"><img src="https://app.apollo.io/favicon.ico"/> Apollo</a>
+              <a class="sb sco" id="btn_contactout" href="#" target="_blank" rel="noopener noreferrer"><img src="https://contactout.com/favicon.ico"/> ContactOut</a>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div>
+            <div class="sec-label">Alt. Contact</div>
+            <div class="g2" style="margin-bottom:16px">
+              <div class="f"><label>Alt. Contact Info</label><input type="text" id="AltContact"/></div>
+              <div class="f" id="f_AltPhone"><label>Alt. Phone</label><input type="text" id="AltPhone"/><span class="hint" id="hint_altphone"></span></div>
+            </div>
+            <div class="srow">
+              <a class="sb sli" id="btn_linkedin_alt"   href="#" target="_blank" rel="noopener noreferrer"><img src="https://static.licdn.com/sc/h/akt4ae504epesldzj74dzred8"/> LinkedIn</a>
+              <a class="sb sco" id="btn_contactout_alt" href="#" target="_blank" rel="noopener noreferrer"><img src="https://contactout.com/favicon.ico"/> ContactOut</a>
+              <a class="sb sap" id="btn_apollo_alt"     href="#" target="_blank" rel="noopener noreferrer"><img src="https://app.apollo.io/favicon.ico"/> Apollo</a>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT -->
+        <div class="col-right">
+          <div>
+            <div class="sec-label">Address</div>
+            <div class="g3" style="margin-bottom:16px">
+              <div class="f" id="f_Street"><label>Street</label><input type="text" id="Street"/></div>
+              <div class="f"><label>City</label><input type="text" id="City"/></div>
+              <div class="f"><label>State</label><input type="text" id="State"/></div>
+            </div>
+            <div class="g2" style="margin-bottom:8px">
+              <div class="f"><label>Zip Code</label><input type="text" id="ZipCode"/></div>
+              <div class="f" style="position:relative"><label>Timezone</label><input type="text" id="Timezone" oninput="checkTimezone()"/><span class="hint" id="hint_timezone"></span></div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px">
+              <span class="hint" id="hint_address"></span>
+              <a class="sb sm" id="btn_maps" href="#" target="_blank" rel="noopener noreferrer"><img src="https://www.google.com/favicon.ico"/> Maps</a>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div>
+            <div class="sec-label">Company Search</div>
+            <div class="srow">
+              <a class="sb sap" id="btn_apollo_company"   href="#" rel="noopener noreferrer"><img src="https://app.apollo.io/favicon.ico"/> Apollo</a>
+              <a class="sb sli" id="btn_linkedin_company" href="#" target="_blank" rel="noopener noreferrer"><img src="https://static.licdn.com/sc/h/akt4ae504epesldzj74dzred8"/> LinkedIn</a>
+              <a class="sb sg"  id="btn_google_company"   href="#" target="_blank" rel="noopener noreferrer"><img src="https://www.google.com/favicon.ico"/> Google</a>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div>
+            <div class="sec-label">Lead Ranking <span id="rankRequired" style="color:#ea4335;display:none">— required</span></div>
+            <div class="rank-suggested" id="rankSuggested"></div>
+            <div class="rank-btns">
+              <button class="rank-btn rb-bad"    onclick="selectRank('bad')">bad</button>
+              <button class="rank-btn rb-good"   onclick="selectRank('good')">good</button>
+              <button class="rank-btn rb-better" onclick="selectRank('better')">better</button>
+              <button class="rank-btn rb-best"   onclick="selectRank('best')">best</button>
+            </div>
+            <div class="rank-reason" id="rankReason"></div>
+            <input type="hidden" id="LeadRanking" value=""/>
+          </div>
+
+          <div class="divider"></div>
+
+          <div style="flex:1;display:flex;flex-direction:column;min-height:0">
+            <div class="sec-label">Notes</div>
+            <div class="f" style="flex:1">
+              <textarea id="Notes" style="height:100%;min-height:52px;resize:none"></textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="btn b-ghost" onclick="goBack()">← Back</button>
+        <button class="btn b-ghost" style="color:#ea4335" onclick="deleteRow()">Delete</button>
+        <button class="btn b-save"  onclick="saveAndNext()">Save & Next →</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="sidebar" id="sidebar">
+    <div class="sb-head">
+      <h3>Progress</h3>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span class="sb-stats" id="sidebarStats">0 / 0</span>
+        <button onclick="toggleSidebar()" style="background:none;border:none;cursor:pointer;color:#bbb;font-size:1rem;padding:0;line-height:1;font-family:inherit;">✕</button>
+      </div>
+    </div>
+    <div class="sb-list" id="sidebarList"></div>
+    <div class="sb-foot">
+      <button class="btn b-dl" onclick="downloadFile()">↓ Download Draft</button>
+    </div>
+  </div>
+</div>
+
+<button class="toggle-btn" id="sidebarToggle" onclick="toggleSidebar()" style="display:none">◀ PROGRESS</button>
+
+<div class="preview-screen" id="previewScreen">
+  <div class="preview-toolbar">
+    <input type="text" id="previewSearch" placeholder="Search company, name, rank..." oninput="filterTable()"/>
+    <button class="btn b-ghost" style="padding:5px 12px;font-size:0.7rem" onclick="downloadFile()">↓ Draft</button>
+    <span class="p-count" id="previewCount"></span>
+  </div>
+  <div class="table-wrap">
+    <table><thead id="previewHead"></thead><tbody id="previewBody"></tbody></table>
+  </div>
+</div>
+
+<div class="done-screen" id="doneScreen">
+  <div style="font-size:2rem">✓</div>
+  <h2>All rows completed</h2>
+  <p>Your validated file is ready.</p>
+  <button class="btn b-save" style="margin-top:6px" onclick="downloadFile()">↓ Download Excel</button>
+  <button class="btn b-ghost" style="margin-top:6px" onclick="goHome()">← Back to Home</button>
+</div>
+
+<script>
+  let currentIndex=0, totalRows=0, currentRow={}, resumeIndex=0, sidebarVisible=true, allPreviewData=[], currentUser='';
+  const PREVIEW_COLS=["Company","Website","Lead Ranking","No. of Employees","Company Industry","First Name","Last Name","Title","Email","Phone","Alt. Contact Info","Alternate Phone","Street","City","State","Zip Code","Timezone","Validated By","Validated Date","Notes"];
+
+  // Check login state on load
+  fetch('/me').then(r=>r.json()).then(data=>{
+    if(data.logged_in){
+      currentUser = data.username;
+      showApp();
+    } else {
+      showLogin();
+    }
+  });
+
+  function showLogin(){
+    document.getElementById('loginScreen').style.display='flex';
+    document.getElementById('homeScreen').style.display='none';
+    document.getElementById('uploadScreen').style.display='none';
+    document.getElementById('validatorScreen').style.display='none';
+    document.getElementById('previewScreen').style.display='none';
+    document.getElementById('doneScreen').style.display='none';
+    document.getElementById('tabBtns').style.display='none';
+    document.getElementById('sidebarToggle').style.display='none';
+    document.getElementById('userChip').style.display='none';
+  }
+
+  function showApp(){
+    document.getElementById('loginScreen').style.display='none';
+    document.getElementById('userChip').style.display='block';
+    document.getElementById('validatedBy').value=currentUser;
+    goHome();
+  }
+
+  function doLogin(){
+    const username=document.getElementById('loginUser').value.trim();
+    const password=document.getElementById('loginPass').value;
+    fetch('/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password})})
+      .then(r=>r.json()).then(data=>{
+        if(data.ok){
+          currentUser=data.username;
+          document.getElementById('loginErr').style.display='none';
+          showApp();
+        } else {
+          document.getElementById('loginErr').style.display='block';
+        }
+      });
+  }
+
+  function doLogout(){
+    fetch('/logout',{method:'POST'}).then(()=>{
+      currentUser='';
+      goHome();
+      showLogin();
+    });
+  }
+
+  document.getElementById('loginPass').addEventListener('keydown',function(e){
+    if(e.key==='Enter') doLogin();
+  });
+
+  function loadHistory(){
+    fetch('/files').then(r=>{
+      if(!r.ok){
+        if(r.status===401){
+          showLogin();
+          return null;
+        }
+        throw new Error('files request failed');
+      }
+      return r.json();
+    }).then(data=>{
+      if(!data) return;
+      const grid = document.getElementById('historyGrid');
+      if(!data.files || data.files.length === 0){
+        grid.innerHTML='<div class="hc-empty">No files yet. Upload one to get started.</div>';
+        return;
+      }
+      grid.innerHTML='';
+      data.files.forEach(f=>{
+        const pct = f.total > 0 ? Math.round((f.done/f.total)*100) : 0;
+        const card = document.createElement('div');
+        card.className = 'history-card';
+        card.innerHTML = `<div class="hc-name" title="${f.filename}">${f.filename}</div>
+          <div class="hc-bar-wrap"><div class="hc-bar" style="width:${pct}%"></div></div>
+          <div class="hc-meta"><span>${f.done} / ${f.total} validated</span><span>${f.modified}</span></div>`;
+        card.onclick = () => openDraft(f.key);
+        grid.appendChild(card);
+      });
+    }).catch(()=>{
+      const grid = document.getElementById('historyGrid');
+      grid.innerHTML='<div class="hc-empty">Unable to load files.</div>';
+    });
+  }
+
+  function openDraft(key){
+    showSpinner(true);
+    fetch(`/open/${key}`).then(r=>r.json()).then(data=>{
+      showSpinner(false);
+      if(data.error){ alert(data.error); return; }
+      totalRows=data.total; resumeIndex=data.resume_index||0;
+      showValidatorScreen();
+      loadSidebar(); loadRow(resumeIndex);
+    });
+  }
+
+  function goHome(){
+    document.getElementById('homeScreen').style.display='flex';
+    document.getElementById('validatorScreen').style.display='none';
+    document.getElementById('previewScreen').style.display='none';
+    document.getElementById('doneScreen').style.display='none';
+    document.getElementById('tabBtns').style.display='none';
+    document.getElementById('sidebarToggle').style.display='none';
+    document.getElementById('progressText').textContent='';
+    document.getElementById('progressBar').style.width='0%';
+    loadHistory();
+  }
+
+  function showValidatorScreen(){
+    document.getElementById('homeScreen').style.display='none';
+    document.getElementById('uploadScreen').style.display='none';
+    document.getElementById('validatorScreen').style.display='flex';
+    document.getElementById('tabBtns').style.display='flex';
+    document.getElementById('sidebarToggle').style.display='block';
+  }
+
+function selectRank(val) {
+    document.getElementById('LeadRanking').value = val;
+    document.querySelectorAll('.rank-btn').forEach(b => b.classList.remove('selected'));
+    document.querySelectorAll('.rank-btn').forEach(b => { if(b.textContent.trim()===val) b.classList.add('selected'); });
+    document.getElementById('rankRequired').style.display = 'none';
+  }
+
+  function switchTab(tab){
+    document.querySelectorAll('.tab-btn').forEach((b,i)=>b.classList.toggle('active',(tab==='validate'&&i===0)||(tab==='preview'&&i===1)));
+    document.getElementById('validatorScreen').style.display=tab==='validate'?'flex':'none';
+    document.getElementById('previewScreen').style.display=tab==='preview'?'flex':'none';
+    document.getElementById('sidebarToggle').style.display=tab==='validate'?'block':'none';
+    if(tab==='preview') loadPreviewTable();
+  }
+
+  function toggleSidebar(){
+    sidebarVisible=!sidebarVisible;
+    document.getElementById('sidebar').classList.toggle('hidden',!sidebarVisible);
+    document.getElementById('sidebarToggle').style.display=sidebarVisible?'none':'block';
+  }
+
+  function uploadFile(input){
+    const file=input.files[0]; if(!file) return;
+    const fd=new FormData(); fd.append("file",file);
+    showSpinner(true);
+    fetch("/upload",{method:"POST",body:fd}).then(r=>r.json()).then(data=>{
+      if(data.error){alert(data.error);showSpinner(false);return;}
+      totalRows=data.total; resumeIndex=data.resume_index||0;
+      showValidatorScreen();
+      loadSidebar(); loadRow(resumeIndex);
+    });
+  }
+
+  function loadRow(idx){
+    showSpinner(true);
+    fetch(`/row/${idx}`).then(r=>r.json()).then(data=>{
+      showSpinner(false);
+      if(data.done){showDone();return;}
+      currentRow=data.row; currentIndex=data.index; totalRows=data.total;
+      renderRow(data.row,data.validations,data.suggested_rank,data.rank_reason);
+      updateProgress(); highlightSidebar(idx);
+    });
+  }
+
+  function loadSidebar(){
+    fetch('/progress').then(r=>r.json()).then(data=>{
+      if(!data.rows) return;
+      totalRows = data.total;
+      const list=document.getElementById('sidebarList'); list.innerHTML='';
+      data.rows.forEach(r=>{
+        const d=document.createElement('div');
+        d.className='sb-item'+(r.done?' done':'')+(r.rank?' rank-'+r.rank:'');
+        d.id='sitem-'+r.index;
+        d.innerHTML=`<div class="sb-dot ${r.done?'d-done':'d-pend'}"></div><div style="flex:1;min-width:0"><div class="sb-co" title="${r.company}">${r.company||'(no name)'}</div><div class="sb-meta">${r.rank?`<span class="rank-badge rank-${r.rank}" style="font-size:0.55rem;padding:1px 5px">${r.rank}</span>`:''} ${r.done?'· '+(r.validated_by||''):''}</div></div>`;
+        d.onclick=()=>loadRow(r.index);
+        list.appendChild(d);
+      });
+      document.getElementById('sidebarStats').textContent=`${data.done_count} / ${data.total}`;
+    }).catch(()=>{});
+  }
+
+  function highlightSidebar(idx){
+    document.querySelectorAll('.sb-item').forEach(el=>el.classList.remove('active'));
+    const el=document.getElementById('sitem-'+idx);
+    if(el){el.classList.add('active');el.scrollIntoView({block:'nearest'});}
+  }
+
+  function loadPreviewTable(){
+    fetch('/progress').then(r=>r.json()).then(data=>{
+      if(!data.rows_full) return;
+      allPreviewData=data.rows_full||[];
+      renderTable(allPreviewData);
+      document.getElementById('previewCount').textContent=`${data.done_count} of ${data.total} validated`;
+    });
+  }
+
+  function renderTable(rows){
+    document.getElementById('previewHead').innerHTML='<tr>'+['#',...PREVIEW_COLS,'Status'].map(c=>`<th>${c}</th>`).join('')+'</tr>';
+    const body=document.getElementById('previewBody'); body.innerHTML='';
+    rows.forEach(r=>{
+      const tr=document.createElement('tr');
+      const rank=r['Lead Ranking']||'';
+      tr.className=rank?'row-'+rank:'';
+      tr.onclick=()=>{switchTab('validate');setTimeout(()=>loadRow(r._index),50);};
+      let cells=`<td>${r._index+1}</td>`;
+      PREVIEW_COLS.forEach(col=>{
+        const val=r[col]||'';
+        cells+=col==='Lead Ranking'&&val?`<td><span class="rank-badge rank-${val}">${val}</span></td>`:`<td title="${val}">${val}</td>`;
+      });
+      cells+=`<td>${r._done?'✓':'—'}</td>`;
+      tr.innerHTML=cells; body.appendChild(tr);
+    });
+  }
+
+  function filterTable(){
+    const q=document.getElementById('previewSearch').value.toLowerCase();
+    renderTable(allPreviewData.filter(r=>PREVIEW_COLS.some(col=>(r[col]||'').toLowerCase().includes(q))));
+  }
+
+  function companyValueFromRow(row){
+    const direct = row['Company'] || row['Company Name'] || row['Company name'] || row['Organization'] || row['Organization Name'] || row['Account Name'] || row['Account'] || row['Client'];
+    if(direct && String(direct).trim() && String(direct).trim().toLowerCase() !== 'nan') return String(direct).trim();
+    const ws = String(row['Website'] || '').trim();
+    if(ws){
+      try {
+        const host = new URL(ws.startsWith('http') ? ws : 'https://' + ws).hostname.replace(/^www\./i, '');
+        if(host) return host;
+      } catch(e) {
+        const value = ws.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0];
+        if(value) return value;
+      }
+    }
+    return '';
+  }
+
+  function renderRow(row,v,suggested_rank,rank_reason){
+    const co = companyValueFromRow(row);
+    document.getElementById("companyName").textContent=co || "—";
+    document.getElementById("CompanyInput").value=co || "";
+    const ws=row["Website"]||"";
+    const wl=document.getElementById("websiteLink"); wl.textContent=ws; wl.href=ws.startsWith("http")?ws:"https://"+ws;
+    document.getElementById("Industry").value=row["Company Industry"]||"";
+    document.getElementById("FirstName").value=row["First Name"]||"";
+    document.getElementById("LastName").value=row["Last Name"]||"";
+    document.getElementById("Title").value=row["Title"]||"";
+    document.getElementById("Email").value=row["Email"]||"";
+    document.getElementById("Phone").value=row["Phone"]||"";
+    document.getElementById("AltContact").value=row["Alt. Contact Info"]||"";
+    document.getElementById("AltPhone").value=row["Alternate Phone"]||"";
+    document.getElementById("Street").value=row["Street"]||"";
+    document.getElementById("City").value=row["City"]||"";
+    document.getElementById("State").value=row["State"]||"";
+    document.getElementById("ZipCode").value=row["Zip Code"]||"";
+    document.getElementById("Timezone").value=row["Timezone"]||"";
+    document.getElementById("NumEmployees").value=row["No. of Employees"]||"";
+    document.getElementById("Website").value=ws;
+    document.getElementById("Notes").value=row["Notes"]||"";
+
+    // Reset rank buttons — no default selection
+    document.getElementById('LeadRanking').value='';
+    document.querySelectorAll('.rank-btn').forEach(b=>b.classList.remove('selected'));
+    document.getElementById('rankRequired').style.display='none';
+
+    // Show suggestion but don't auto-select
+    document.getElementById('rankSuggested').textContent = suggested_rank ? `Suggested: ${suggested_rank}` : '';
+    document.getElementById('rankReason').textContent=rank_reason||"";
+
+    // If row already has a saved rank, select it
+    const savedRank = row["Lead Ranking"]||"";
+    if(savedRank) selectRank(savedRank);
+
+    setHint("hint_phone","f_Phone",v.phone);
+    setHint("hint_email","f_Email",v.email);
+    setHint("hint_website","f_Website",v.website);
+    setHint("hint_title","f_Title",v.title);
+
+    const ap=row["Alternate Phone"]||"";
+    if(ap.trim()){
+      const d=ap.replace(/\D/g,'').replace(/^1(\d{10})$/,'$1');
+      const TF=[800,833,844,855,866,877,888];
+      const ok=d.length===10&&!TF.includes(parseInt(d.substring(0,3)));
+      setHint("hint_altphone","f_AltPhone",{valid:ok,msg:ok?"Valid":"Invalid"});
+    } else { document.getElementById("hint_altphone").textContent=""; document.getElementById("f_AltPhone").className="f"; }
+
+    const name=`${row["First Name"]||""} ${row["Last Name"]||""}`.trim();
+    const co = companyValueFromRow(row);
+    const companySearch = co || (ws ? (function(){try{return new URL(ws.startsWith('http')?ws:'https://'+ws).hostname.replace(/^www\./i,'');}catch(e){return '';}}()) : '');
+    document.getElementById("btn_google").href=`https://www.google.com/search?q=${encodeURIComponent((companySearch || co)+' '+name+' phone number')}`;
+    document.getElementById("btn_linkedin").href=`https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(name+' '+(companySearch || co))}`;
+    document.getElementById("btn_apollo").href=`https://app.apollo.io/#/people?q_organization_name=${encodeURIComponent(companySearch || co)}&q_keywords=${encodeURIComponent(name)}`;
+    document.getElementById("btn_contactout").href=`https://contactout.com/search?name=${encodeURIComponent(name)}&company=${encodeURIComponent(companySearch || co)}`;
+    document.getElementById("btn_linkedin_company").href=`https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(companySearch || co)}`;
+    document.getElementById("btn_google_company").href=`https://www.google.com/search?q=${encodeURIComponent(companySearch || co)}`;
+    document.getElementById("btn_apollo_company").onclick=function(e){
+      e.preventDefault();
+      const apolloUrl=`https://app.apollo.io/#/companies?q_organization_name=${encodeURIComponent(companySearch || co)}`;
+      if(ws) openLink(ws.startsWith("http")?ws:"https://"+ws);
+      openLink(apolloUrl);
+    };
+    document.getElementById("btn_apollo_company").setAttribute('href', `https://app.apollo.io/#/companies?q_organization_name=${encodeURIComponent(companySearch || co)}`);
+    const addr=`${row["Street"]||""}, ${row["City"]||""}, ${row["State"]||""} ${row["Zip Code"]||""}`;
+    document.getElementById("btn_maps").href=`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr)}`;
+
+    const ah=document.getElementById("hint_address");
+    ah.textContent="Address: "+v.address.msg; ah.className="hint "+(v.address.valid?"ok":"err");
+    document.getElementById("f_Street").className="f "+(v.address.valid?"fv":"fi");
+    checkTimezone();
+    updateLinkHandlers();
+  }
+
+  function setHint(hId,fId,v){
+    const el=document.getElementById(hId);
+    if(el){el.textContent=v.msg;el.className="hint "+(v.valid?"ok":"err");}
+    if(fId){const f=document.getElementById(fId);if(f)f.className="f "+(v.valid?"fv":"fi");}
+  }
+
+  function saveAndNext(){
+    const rank=document.getElementById('LeadRanking').value;
+    if(!rank){
+      document.getElementById('rankRequired').style.display='inline';
+      return;
+    }
+    if(!document.getElementById('NumEmployees').value.trim()){
+      document.getElementById('NumEmployees').style.borderColor='#ea4335';
+      document.getElementById('NumEmployees').focus();
+      return;
+    }
+    const vb=document.getElementById("validatedBy").value.trim();
+    const today=new Date().toLocaleDateString("en-US",{month:"2-digit",day:"2-digit",year:"numeric"});
+    const payload={
+      "Company":document.getElementById("CompanyInput").value.trim() || document.getElementById("companyName").textContent.trim(),
+      "First Name":document.getElementById("FirstName").value,
+      "Last Name":document.getElementById("LastName").value,
+      "Title":document.getElementById("Title").value,
+      "Email":document.getElementById("Email").value,
+      "Phone":document.getElementById("Phone").value,
+      "Alt. Contact Info":document.getElementById("AltContact").value,
+      "Alternate Phone":document.getElementById("AltPhone").value,
+      "Street":document.getElementById("Street").value,
+      "City":document.getElementById("City").value,
+      "State":document.getElementById("State").value,
+      "Zip Code":document.getElementById("ZipCode").value,
+      "Timezone":document.getElementById("Timezone").value,
+      "No. of Employees":document.getElementById("NumEmployees").value,
+      "Company Industry":document.getElementById("Industry").value,
+      "Website":document.getElementById("Website").value,
+      "Notes":document.getElementById("Notes").value,
+      "Lead Ranking":rank,
+      "Validated By":vb,"Validated Date":today
+    };
+    fetch(`/save/${currentIndex}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})
+      .then(r=>r.json()).then(data=>{
+        loadSidebar();
+        loadRow(currentIndex+1);
+      });
+  }
+
+  const STATE_TZ = {
+    'AL':'CST','AK':'AKST','AZ':'MST','AR':'CST','CA':'PST','CO':'MST','CT':'EST','DE':'EST',
+    'FL':'EST','GA':'EST','HI':'HST','ID':'MST','IL':'CST','IN':'EST','IA':'CST','KS':'CST',
+    'KY':'EST','LA':'CST','ME':'EST','MD':'EST','MA':'EST','MI':'EST','MN':'CST','MS':'CST',
+    'MO':'CST','MT':'MST','NE':'CST','NV':'PST','NH':'EST','NJ':'EST','NM':'MST','NY':'EST',
+    'NC':'EST','ND':'CST','OH':'EST','OK':'CST','OR':'PST','PA':'EST','RI':'EST','SC':'EST',
+    'SD':'CST','TN':'CST','TX':'CST','UT':'MST','VT':'EST','VA':'EST','WA':'PST','WV':'EST',
+    'WI':'CST','WY':'MST','DC':'EST'
+  };
+
+  function checkTimezone(){
+    const tz = document.getElementById('Timezone').value.trim().toUpperCase();
+    const state = document.getElementById('State').value.trim().toUpperCase();
+    const hint = document.getElementById('hint_timezone');
+    if(!tz || !state){ hint.textContent=''; return; }
+    const expected = STATE_TZ[state];
+    if(!expected){ hint.textContent=''; return; }
+    if(tz === expected || tz.toUpperCase().includes(expected)){
+      hint.textContent='✓ Matches '+expected; hint.className='hint ok';
+    } else {
+      hint.textContent='Expected '+expected+' for '+state; hint.className='hint err';
+    }
+  }
+
+  document.getElementById('Timezone').addEventListener('input', checkTimezone);
+  document.getElementById('State').addEventListener('input', checkTimezone);
+
+  document.getElementById('NumEmployees').addEventListener('input',function(){
+    this.style.borderColor='';
+  });
+
+  function openLink(url) {
+    window.open(url, '_blank');
+  }
+
+  // Alt contact buttons use live input value at click time
+  ['btn_linkedin_alt','btn_contactout_alt','btn_apollo_alt'].forEach(id => {
+    document.getElementById(id).addEventListener('click', function(e) {
+      e.preventDefault();
+      const an = document.getElementById('AltContact').value.split('-')[0].trim();
+      const co = document.getElementById('companyName').textContent.trim();
+      const urls = {
+        btn_linkedin_alt:   `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(an)}`,
+        btn_contactout_alt: `https://contactout.com/search?name=${encodeURIComponent(an)}&company=${encodeURIComponent(co)}`,
+        btn_apollo_alt:     `https://app.apollo.io/#/people?q_organization_name=${encodeURIComponent(co)}&q_keywords=${encodeURIComponent(an)}`
+      };
+      openLink(urls[id]);
+    });
+  });
+
+  function updateLinkHandlers() {
+    document.querySelectorAll('a.sb:not(#btn_linkedin_alt):not(#btn_contactout_alt):not(#btn_apollo_alt)').forEach(a => {
+      a.onclick = function(e) {
+        e.preventDefault();
+        const url = this.getAttribute('href');
+        if (url && url !== '#') openLink(url);
+      };
+    });
+  }
+  function deleteRow(){
+    if(!confirm('Delete this row permanently?')) return;
+    fetch(`/delete/${currentIndex}`,{method:'POST'}).then(r=>r.json()).then(data=>{
+      totalRows=data.total;
+      loadSidebar();
+      loadRow(currentIndex < totalRows ? currentIndex : currentIndex - 1);
+    });
+  }
+
+  function goBack(){if(currentIndex>0)loadRow(currentIndex-1);}
+
+  function getCurrentPayload(){
+    const rank=document.getElementById('LeadRanking').value;
+    if(!rank) return null;
+    const vb=document.getElementById("validatedBy").value.trim();
+    const today=new Date().toLocaleDateString("en-US",{month:"2-digit",day:"2-digit",year:"numeric"});
+    return {
+      "Company":document.getElementById("CompanyInput").value.trim() || document.getElementById("companyName").textContent.trim(),
+      "First Name":document.getElementById("FirstName").value,
+      "Last Name":document.getElementById("LastName").value,
+      "Title":document.getElementById("Title").value,
+      "Email":document.getElementById("Email").value,
+      "Phone":document.getElementById("Phone").value,
+      "Alt. Contact Info":document.getElementById("AltContact").value,
+      "Alternate Phone":document.getElementById("AltPhone").value,
+      "Street":document.getElementById("Street").value,
+      "City":document.getElementById("City").value,
+      "State":document.getElementById("State").value,
+      "Zip Code":document.getElementById("ZipCode").value,
+      "Timezone":document.getElementById("Timezone").value,
+      "No. of Employees":document.getElementById("NumEmployees").value,
+      "Company Industry":document.getElementById("Industry").value,
+      "Website":document.getElementById("Website").value,
+      "Notes":document.getElementById("Notes").value,
+      "Lead Ranking":rank,
+      "Validated By":vb,"Validated Date":today
+    };
+  }
+
+  function autoSave(){
+    if(totalRows===0) return;
+    const payload=getCurrentPayload();
+    if(!payload) return;
+    fetch(`/save/${currentIndex}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})
+      .then(r=>r.json()).then(data=>{
+        document.getElementById('sidebarStats').textContent=`${data.done_count} / ${totalRows}`;
+      });
+  }
+
+  setInterval(autoSave, 30000);
+
+  window.addEventListener('beforeunload', function(){
+    const payload=getCurrentPayload();
+    if(!payload) return;
+    const blob=new Blob([JSON.stringify(payload)],{type:'application/json'});
+    navigator.sendBeacon(`/save/${currentIndex}`, blob);
+  });
+
+  function updateProgress(){
+    const pct=Math.round((currentIndex/totalRows)*100);
+    document.getElementById("progressBar").style.width=pct+"%";
+    document.getElementById("progressText").textContent=`${currentIndex+1} / ${totalRows}`;
+  }
+
+  function showDone(){
+    document.getElementById("validatorScreen").style.display="none";
+    document.getElementById("previewScreen").style.display="none";
+    document.getElementById("doneScreen").style.display="flex";
+    document.getElementById("sidebarToggle").style.display="none";
+    document.getElementById("progressBar").style.width="100%";
+    document.getElementById("progressText").textContent=`${totalRows} / ${totalRows}`;
+    loadHistory();
+  }
+
+  function downloadFile(){window.location.href="/download";}
+  function showSpinner(show){document.getElementById("spinner").className=show?"spinner on":"spinner";}
+</script>
+</body>
+</html>
