@@ -43,7 +43,15 @@ APOLLO_API_KEY = _clean_api_key(os.getenv("APOLLO_API_KEY"))
 APOLLO_BASE_URL = "https://api.apollo.io"
 
 app = Flask(__name__)
-app.secret_key = "revalidation_tool_secret_2024"
+
+app.config["SECRET_KEY"] = os.getenv("FLASK_SECRET_KEY")
+
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SECURE=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    PERMANENT_SESSION_LIFETIME=86400
+)
 
 DRAFT_DIR = "drafts"
 os.makedirs(DRAFT_DIR, exist_ok=True)
@@ -748,14 +756,26 @@ def contactout_enrich(idx):
 @app.route("/login", methods=["POST"])
 def login():
     data = request.json or {}
+
     users = load_users()
+
     username = data.get("username", "").strip().lower()
     password = data.get("password", "")
-    if username in users and users[username] == password:
-        session["username"] = username
-        return jsonify({"ok": True, "username": username})
-    return jsonify({"error": "Invalid username or password"}), 401
 
+    if username in users and users[username] == password:
+        session.clear()
+
+        session["username"] = username
+        session.permanent = True
+
+        return jsonify({
+            "ok": True,
+            "username": username
+        })
+
+    return jsonify({
+        "error": "Invalid username or password"
+    }), 401
 
 @app.route("/logout", methods=["POST"])
 def logout():
@@ -794,19 +814,74 @@ def list_files():
         base = fname[len(prefix):].replace("_draft.xlsx", "")
 
         try:
-            # Get file modification time without loading the Excel
             modified = os.path.getmtime(draft_path)
             modified_str = datetime.fromtimestamp(
                 modified
             ).strftime("%b %d, %Y %I:%M %p")
 
-            # Only get basic file information here.
-            # Do NOT load the entire Excel workbook.
+            # Default values.
+            total = 0
+            done = 0
+
+            # Read only the workbook metadata/header first.
+            # Do not load the complete dataframe here.
+            try:
+                import openpyxl
+
+                wb = openpyxl.load_workbook(
+                    draft_path,
+                    read_only=True,
+                    data_only=True
+                )
+
+                ws = wb.active
+
+                # Count rows without creating a pandas DataFrame.
+                total = max(ws.max_row - 1, 0)
+
+                # Find _validated column.
+                headers = [
+                    cell.value
+                    for cell in next(ws.iter_rows(min_row=1, max_row=1))
+                ]
+
+                validated_col = None
+
+                for i, header in enumerate(headers, start=1):
+                    if header == "_validated":
+                        validated_col = i
+                        break
+
+                # Count validated rows.
+                if validated_col:
+                    for row in ws.iter_rows(
+                        min_row=2,
+                        min_col=validated_col,
+                        max_col=validated_col,
+                        values_only=True
+                    ):
+                        if row[0] == "1":
+                            done += 1
+
+                wb.close()
+
+            except Exception as excel_error:
+                print(
+                    f"Excel metadata error for {fname}: "
+                    f"{excel_error}"
+                )
+
+            if done >= total and total > 0:
+                status = "Completed"
+            else:
+                status = "In Progress"
+
             files.append({
                 "key": base,
                 "filename": base + ".xlsx",
-                "total": 0,
-                "done": 0,
+                "total": total,
+                "done": done,
+                "status": status,
                 "modified": modified_str,
                 "modified_ts": modified
             })
@@ -815,12 +890,27 @@ def list_files():
             print(f"Error reading file info for {fname}: {e}")
             continue
 
-    files.sort(key=lambda x: x["modified_ts"], reverse=True)
+    files.sort(
+        key=lambda x: x["modified_ts"],
+        reverse=True
+    )
 
     for f in files:
         del f["modified_ts"]
 
-    return jsonify({"files": files})
+    total_files = len(files)
+    completed_files = sum(
+        1 for f in files
+        if f["status"] == "Completed"
+    )
+    in_progress_files = total_files - completed_files
+
+    return jsonify({
+        "files": files,
+        "total_files": total_files,
+        "in_progress_files": in_progress_files,
+        "completed_files": completed_files
+    })
 
 
 @app.route("/open/<key>")
