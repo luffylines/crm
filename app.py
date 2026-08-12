@@ -13,6 +13,35 @@ from geopy.exc import GeocoderTimedOut
 import time
 from functools import wraps
 
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover - fallback when python-dotenv is not installed
+    def load_dotenv(*args, **kwargs):
+        return False
+
+dotenv_path = os.path.join(os.path.dirname(__file__), ".env")
+load_dotenv(dotenv_path)
+
+def _clean_api_key(value):
+    if value is None:
+        return ""
+    clean = str(value).strip()
+    if not clean:
+        return ""
+    lowered = clean.lower()
+    placeholder_markers = [
+        "paste_", "your_", "demo", "example", "placeholder", "replace_me", "changeme"
+    ]
+    if any(marker in lowered for marker in placeholder_markers):
+        return ""
+    return clean
+
+
+CONTACTOUT_API_KEY = _clean_api_key(os.getenv("CONTACTOUT_API_KEY"))
+CONTACTOUT_BASE_URL = "https://api.contactout.com"
+APOLLO_API_KEY = _clean_api_key(os.getenv("APOLLO_API_KEY"))
+APOLLO_BASE_URL = "https://api.apollo.io"
+
 app = Flask(__name__)
 app.secret_key = "revalidation_tool_secret_2024"
 
@@ -27,6 +56,31 @@ def load_users():
     path = os.path.join(os.path.dirname(__file__), "users.json")
     with open(path) as f:
         return {u["username"]: u["password"] for u in json.load(f)["users"]}
+
+
+def normalize_company_fields(df):
+    if df is None:
+        return df
+
+    if "Company" not in df.columns:
+        df["Company"] = ""
+
+    company_candidates = [
+        "Company Name", "company_name", "Company name", "company name",
+        "Organization Name", "organization_name", "CompanyName"
+    ]
+
+    for candidate in company_candidates:
+        if candidate not in df.columns:
+            continue
+        if df["Company"].isna().all() or df["Company"].astype(str).str.strip().eq("").all():
+            df["Company"] = df[candidate].fillna("")
+            continue
+        mask = df["Company"].astype(str).str.strip().eq("")
+        if mask.any():
+            df.loc[mask, "Company"] = df.loc[mask, candidate].fillna("")
+
+    return df
 
 
 def login_required(f):
@@ -107,7 +161,18 @@ def get_draft_path(filename):
     base = os.path.splitext(os.path.basename(filename))[0]
     user = get_username()
     prefix = f"{user}_" if user else ""
-    return os.path.join(DRAFT_DIR, f"{prefix}{base}_draft.xlsx")
+    draft_name = f"{prefix}{base}_draft.xlsx"
+    draft_path = os.path.join(DRAFT_DIR, draft_name)
+    if not os.path.exists(draft_path):
+        return draft_path
+
+    counter = 2
+    while True:
+        alt_name = f"{prefix}{base}_{counter}_draft.xlsx"
+        alt_path = os.path.join(DRAFT_DIR, alt_name)
+        if not os.path.exists(alt_path):
+            return alt_path
+        counter += 1
 
 
 def get_session_key():
@@ -189,6 +254,28 @@ def validate_email(email):
     return False, "Invalid format"
 
 
+def normalize_validated_date(value):
+    if value is None:
+        return datetime.now().strftime("%Y-%m-%d")
+    text = str(value).strip()
+    if not text or text.lower() == "nan":
+        return datetime.now().strftime("%Y-%m-%d")
+    try:
+        parsed = datetime.strptime(text, "%Y-%m-%d")
+        return parsed.strftime("%Y-%m-%d")
+    except ValueError:
+        pass
+
+    for fmt in ("%m/%d/%Y", "%m-%d-%Y", "%m/%d/%y", "%Y/%m/%d", "%d-%m-%Y", "%d/%m/%Y"):
+        try:
+            parsed = datetime.strptime(text, fmt)
+            return parsed.strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+
+    return datetime.now().strftime("%Y-%m-%d")
+
+
 def validate_website(url):
     if not url or str(url).strip() == "" or str(url).strip().lower() == "nan":
         return False, "Missing"
@@ -197,8 +284,11 @@ def validate_website(url):
         if not url.startswith("http"):
             url = "https://" + url
         resp = req.get(url, timeout=7, allow_redirects=True)
+        # Accept 2xx and 3xx as valid; allow 403/404 (site may block automation but exists)
         if resp.status_code < 400:
             return True, "Active"
+        elif resp.status_code in [403, 404]:
+            return True, f"HTTP {resp.status_code} (restricted access)"
         return False, f"HTTP {resp.status_code}"
     except Exception:
         return False, "Unreachable"
@@ -287,6 +377,373 @@ def run_validations(row):
     suggested_rank, rank_reason = calculate_rank(row, validations)
     return validations, suggested_rank, rank_reason
 
+
+def _co_field(row, *keys):
+    if not isinstance(row, dict):
+        return ""
+    for key in keys:
+        if key in row and row.get(key) not in (None, ""):
+            return row.get(key)
+    return ""
+
+
+def _get_contact_name_parts(row):
+    first = str(_co_field(row, "First Name", "first_name", "firstName") or "").strip()
+    last = str(_co_field(row, "Last Name", "last_name", "lastName") or "").strip()
+
+    if (not first or not last) and isinstance(row, dict):
+        full_name = str(_co_field(row, "Name", "name", "full_name", "fullName") or "").strip()
+        if full_name and re.search(r"\s", full_name):
+            parts = full_name.split()
+            if not first:
+                first = parts[0]
+            if not last and len(parts) > 1:
+                last = " ".join(parts[1:])
+
+    if not first and last:
+        first = last
+        last = ""
+    return first, last
+
+
+def _is_demo_profile(profile):
+    if not isinstance(profile, dict):
+        return False
+
+    needles = []
+    for key in ("full_name", "name", "headline"):
+        value = profile.get(key)
+        if value:
+            needles.append(str(value).lower())
+
+    company = profile.get("company") or {}
+    if isinstance(company, dict):
+        company_name = company.get("name") or ""
+    else:
+        company_name = str(company)
+    if company_name:
+        needles.append(str(company_name).lower())
+
+    combined = " ".join(needles)
+    demo_markers = [
+        "example person",
+        "legros, smitham and kessler",
+        "manager, business operations & marketing at obm",
+        "example-person",
+    ]
+    return any(marker in combined for marker in demo_markers)
+
+
+def apollo_search_person(first_name, last_name, company="", title="", include_contacts=False):
+    if not APOLLO_API_KEY:
+        return {
+            "ok": True,
+            "found": False,
+            "provider": "apollo",
+            "profile": None,
+            "message": "Apollo API key is not configured."
+        }
+
+    payload = {
+        "api_key": APOLLO_API_KEY,
+        "first_name": first_name,
+        "last_name": last_name,
+        "page": 1,
+        "per_page": 1,
+    }
+
+    if company:
+        payload["organization_name"] = company
+    if title:
+        payload["title"] = title
+
+    try:
+        response = req.post(
+            f"{APOLLO_BASE_URL}/v1/people/search",
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": APOLLO_API_KEY,
+                "Accept": "application/json",
+            },
+            json=payload,
+            timeout=30,
+        )
+
+        try:
+            data = response.json()
+        except ValueError:
+            data = {}
+
+        if response.status_code >= 400:
+            return {
+                "ok": True,
+                "found": False,
+                "provider": "apollo",
+                "profile": None,
+                "message": data.get("message", "Apollo request failed."),
+                "status_code": response.status_code,
+            }
+
+        people = data.get("people") or data.get("results") or []
+        if not people:
+            return {
+                "ok": True,
+                "found": False,
+                "provider": "apollo",
+                "profile": None,
+                "message": "No valid Apollo profile found."
+            }
+
+        person = people[0]
+        company_name = person.get("organization_name") or ((person.get("organization") or {}).get("name")) or company
+        headline = person.get("title") or title or ""
+        full_name = person.get("name") or f"{first_name} {last_name}".strip()
+        result = {
+            "ok": True,
+            "found": True,
+            "provider": "apollo",
+            "profile": {
+                "first_name": person.get("first_name") or first_name,
+                "last_name": person.get("last_name") or last_name,
+                "full_name": full_name,
+                "headline": headline,
+                "url": person.get("linkedin_url") or "",
+                "location": person.get("city") or "",
+                "country": person.get("country") or "",
+                "company": {
+                    "name": company_name,
+                    "website": person.get("organization_website") or "",
+                    "industry": person.get("organization_industry") or "",
+                    "size": person.get("organization_size") or "",
+                    "overview": "",
+                    "headquarter": person.get("organization_city") or "",
+                },
+                "email": [person.get("email")] if person.get("email") else [],
+                "work_email": [person.get("email")] if person.get("email") else [],
+                "phone": [person.get("phone")] if person.get("phone") else [],
+                "linkedin_url": person.get("linkedin_url") or "",
+                "name": full_name,
+            }
+        }
+        if include_contacts:
+            result["profile"]["work_email"] = result["profile"]["email"]
+        return result
+
+    except req.RequestException as e:
+        return {
+            "ok": True,
+            "found": False,
+            "provider": "apollo",
+            "profile": None,
+            "message": f"Apollo connection error: {str(e)}"
+        }
+
+    except Exception as e:
+        return {
+            "ok": True,
+            "found": False,
+            "provider": "apollo",
+            "profile": None,
+            "message": str(e)
+        }
+
+
+def contactout_enrich_person(row, include_contacts=False):
+    """
+    Enrich one person using ContactOut.
+
+    By default, email/phone are NOT requested
+    to avoid unnecessary contact-credit usage.
+    """
+    first_name, last_name = _get_contact_name_parts(row)
+    company_value = _co_field(row, "Company", "company") or ""
+    if isinstance(company_value, (list, tuple, set)):
+        company = " ".join(str(v).strip() for v in company_value if str(v).strip())
+    else:
+        company = str(company_value).strip()
+    title = str(_co_field(row, "Title", "title", "job_title") or "").strip()
+    city = str(_co_field(row, "City", "city", "location") or "").strip()
+    website = str(_co_field(row, "Website", "website") or "").strip()
+
+    if not first_name or not last_name:
+        return {
+            "ok": True,
+            "found": False,
+            "profile": None,
+            "message": "First Name and Last Name are required."
+        }
+
+    payload = {
+        "first_name": first_name,
+        "last_name": last_name,
+    }
+
+    if not CONTACTOUT_API_KEY:
+        if APOLLO_API_KEY:
+            apollo_result = apollo_search_person(first_name, last_name, company, title, include_contacts=include_contacts)
+            if apollo_result.get("found"):
+                apollo_result["message"] = "ContactOut is not configured; used Apollo fallback."
+                return apollo_result
+        return {
+            "ok": True,
+            "found": False,
+            "profile": None,
+            "message": "ContactOut key is missing or placeholder. Add a real CONTACTOUT_API_KEY to .env."
+        }
+    if company:
+        payload["company"] = [company]
+
+    if title:
+        payload["job_title"] = title
+        payload["title"] = title
+
+    if city:
+        payload["location"] = city
+
+    if website:
+        domain = website.strip()
+        domain = re.sub(r"^https?://", "", domain, flags=re.I)
+        domain = re.sub(r"^www\.", "", domain, flags=re.I)
+        domain = domain.split("/")[0]
+        if domain:
+            payload["company_domain"] = [domain]
+
+    if include_contacts:
+        payload["include"] = [
+            "work_email",
+            "personal_email",
+            "phone"
+        ]
+
+    try:
+        response = req.post(
+            f"{CONTACTOUT_BASE_URL}/v1/people/enrich",
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "token": CONTACTOUT_API_KEY
+            },
+            json=payload,
+            timeout=30
+        )
+
+        try:
+            data = response.json()
+        except ValueError:
+            data = {}
+
+        if response.status_code >= 400:
+            return {
+                "ok": True,
+                "found": False,
+                "provider": "contactout",
+                "profile": None,
+                "message": data.get("message", "ContactOut request failed."),
+                "status_code": response.status_code,
+                "details": data,
+            }
+
+        profile = data.get("profile")
+
+        if not profile or _is_demo_profile(profile):
+            apollo_result = apollo_search_person(first_name, last_name, company, title, include_contacts=include_contacts)
+            if apollo_result.get("found"):
+                apollo_result["message"] = "No valid ContactOut match found; used Apollo fallback."
+                return apollo_result
+            if not APOLLO_API_KEY:
+                message = "No valid ContactOut profile found and Apollo key is missing or invalid. Add a real APOLLO_API_KEY to .env."
+            else:
+                message = "No valid ContactOut or Apollo profile found."
+            return {
+                "ok": True,
+                "found": False,
+                "provider": "none",
+                "profile": None,
+                "message": message
+            }
+
+        return {
+            "ok": True,
+            "found": True,
+            "provider": "contactout",
+            "profile": profile
+        }
+
+    except req.RequestException as e:
+        return {
+            "ok": True,
+            "found": False,
+            "profile": None,
+            "message": f"ContactOut connection error: {str(e)}"
+        }
+
+    except Exception as e:
+        return {
+            "ok": True,
+            "found": False,
+            "profile": None,
+            "message": str(e)
+        }
+
+
+@app.route("/contactout/search", methods=["POST"])
+def contactout_search():
+    data = request.get_json(silent=True) or {}
+
+    full_name = data.get("name") or data.get("full_name") or data.get("fullName") or ""
+    if full_name and not (data.get("first_name") or data.get("firstName") or data.get("last_name") or data.get("lastName")):
+        parts = full_name.split(None, 1)
+        first_name = parts[0] if parts else ""
+        last_name = parts[1] if len(parts) > 1 else ""
+    else:
+        first_name = data.get("first_name") or data.get("firstName") or ""
+        last_name = data.get("last_name") or data.get("lastName") or ""
+
+    row = {
+        "First Name": first_name,
+        "Last Name": last_name,
+        "Name": full_name,
+        "Company": data.get("company") or "",
+        "Title": data.get("title") or data.get("job_title") or data.get("role") or "",
+        "City": data.get("city") or data.get("location") or "",
+        "Website": data.get("website") or "",
+    }
+
+    include_contacts = bool(data.get("include_contacts", False))
+    result = contactout_enrich_person(row, include_contacts=include_contacts)
+    result.setdefault("found", False)
+    return jsonify(result)
+
+
+@app.route("/contactout/enrich/<int:idx>", methods=["POST"])
+@login_required
+def contactout_enrich(idx):
+
+    store = get_store()
+
+    if not store:
+        return jsonify({"error": "No file loaded"}), 400
+
+    df = store["df"]
+
+    if idx < 0 or idx >= len(df):
+        return jsonify({"error": "Invalid row index"}), 400
+
+    row = df.iloc[idx].to_dict()
+
+    data = request.json or {}
+
+    # Default = FALSE
+    include_contacts = bool(
+        data.get("include_contacts", False)
+    )
+
+    result = contactout_enrich_person(
+        row,
+        include_contacts=include_contacts
+    )
+
+    return jsonify(result)
 
 @app.route("/login", methods=["POST"])
 def login():
@@ -385,8 +842,11 @@ def open_file(key):
         if "_validated" in df.columns:
             validated = set(df.index[df["_validated"] == "1"].tolist())
             df = df.drop(columns=["_validated"])
+        df = normalize_company_fields(df)
         if "Lead Ranking" not in df.columns:
             df["Lead Ranking"] = ""
+        if "Validated Date" not in df.columns:
+            df["Validated Date"] = ""
         store = {"df": df, "original_df": df.copy(), "filename": key + ".xlsx", "validated": validated}
         stores[store_key] = store
         session["file_key"] = key
@@ -404,18 +864,20 @@ def upload():
         return jsonify({"error": "No file uploaded"}), 400
 
     filename = file.filename
-    base = os.path.splitext(os.path.basename(filename))[0]
-    key = base
+    draft_path = get_draft_path(filename)
+    key = os.path.splitext(os.path.basename(draft_path))[0].replace("_draft", "")
 
     df = pd.read_excel(file, dtype=str).fillna("")
     if "be" in df.columns:
         df.rename(columns={"be": "Lead Ranking"}, inplace=True)
+    df = normalize_company_fields(df)
     if "Lead Ranking" not in df.columns:
         df["Lead Ranking"] = ""
+    if "Validated Date" not in df.columns:
+        df["Validated Date"] = ""
 
     validated = set()
     resume_index = 0
-    draft_path = get_draft_path(filename)
 
     if os.path.exists(draft_path):
         try:
@@ -432,6 +894,7 @@ def upload():
     store = {"df": df, "original_df": df.copy(), "filename": filename, "validated": validated}
     session["file_key"] = key
     store_key = get_session_key()
+    safe_write_excel(df, draft_path)
     save_store(store_key, store)
 
     return jsonify({"total": len(df), "columns": list(df.columns), "resume_index": resume_index, "resumed": os.path.exists(draft_path)})
@@ -505,7 +968,18 @@ def save_row(idx):
     if added:   parts.append("Added: " + ", ".join(added))
     changes_text = " | ".join(parts)
 
+    normalized_payload = {}
     for key, value in data.items():
+        if key == "Validated Date":
+            normalized_payload[key] = normalize_validated_date(value)
+        else:
+            normalized_payload[key] = value
+
+    for key in ["Company", "Validated Date"]:
+        if key not in df.columns:
+            df[key] = ""
+
+    for key, value in normalized_payload.items():
         if key in df.columns:
             df.at[idx, key] = value
 
