@@ -782,32 +782,44 @@ def list_files():
     files = []
     user = get_username()
     prefix = f"{user}_"
+
     for fname in os.listdir(DRAFT_DIR):
         if not fname.endswith("_draft.xlsx"):
             continue
+
         if not fname.startswith(prefix):
             continue
+
         draft_path = os.path.join(DRAFT_DIR, fname)
         base = fname[len(prefix):].replace("_draft.xlsx", "")
+
         try:
-            df = pd.read_excel(draft_path, dtype=str).fillna("")
-            total = len(df)
-            done = int((df.get("_validated", pd.Series(dtype=str)) == "1").sum()) if "_validated" in df.columns else 0
+            # Get file modification time without loading the Excel
             modified = os.path.getmtime(draft_path)
-            modified_str = datetime.fromtimestamp(modified).strftime("%b %d, %Y %I:%M %p")
+            modified_str = datetime.fromtimestamp(
+                modified
+            ).strftime("%b %d, %Y %I:%M %p")
+
+            # Only get basic file information here.
+            # Do NOT load the entire Excel workbook.
             files.append({
                 "key": base,
                 "filename": base + ".xlsx",
-                "total": total,
-                "done": done,
+                "total": 0,
+                "done": 0,
                 "modified": modified_str,
                 "modified_ts": modified
             })
-        except Exception:
-            pass
+
+        except Exception as e:
+            print(f"Error reading file info for {fname}: {e}")
+            continue
+
     files.sort(key=lambda x: x["modified_ts"], reverse=True)
+
     for f in files:
         del f["modified_ts"]
+
     return jsonify({"files": files})
 
 
