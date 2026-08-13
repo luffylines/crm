@@ -10,6 +10,8 @@ import app as app_module
 
 def test_contactout_search_route_accepts_manual_search_payload():
     client = app_module.app.test_client()
+    with client.session_transaction() as sess:
+        sess["username"] = "uploader"
 
     response = client.post(
         "/contactout/search",
@@ -161,3 +163,72 @@ def test_upload_keeps_multiple_files_with_same_name(monkeypatch, tmp_path):
     files = client.get("/files").get_json()["files"]
     assert len(files) >= 2
     assert any(f["filename"] == "repeat.xlsx" for f in files)
+
+
+def test_save_row_debounces_excel_disk_writes(monkeypatch, tmp_path):
+    monkeypatch.setattr(app_module, "DRAFT_DIR", str(tmp_path))
+    os.makedirs(tmp_path, exist_ok=True)
+
+    client = app_module.app.test_client()
+    with client.session_transaction() as sess:
+        sess["username"] = "uploader"
+        sess["file_key"] = "demo"
+
+    draft_path = os.path.join(tmp_path, "uploader_demo_draft.xlsx")
+    pd.DataFrame({"Company": ["Acme"], "Lead Ranking": ["good"], "Website": ["https://example.com"]}).to_excel(draft_path, index=False)
+
+    store = {
+        "df": pd.DataFrame({"Company": ["Acme"], "Lead Ranking": ["good"], "Website": ["https://example.com"]}),
+        "original_df": pd.DataFrame({"Company": ["Acme"], "Lead Ranking": ["good"], "Website": ["https://example.com"]}),
+        "validated": set(),
+        "filename": "demo.xlsx",
+    }
+    app_module.stores["uploader::demo"] = store
+
+    calls = {"count": 0}
+
+    def fake_write(df, path):
+        calls["count"] += 1
+        return True
+
+    monkeypatch.setattr(app_module, "safe_write_excel", fake_write)
+
+    first = client.post("/save/0", json={"Company": "Acme", "Lead Ranking": "best", "Website": "https://example.com"})
+    second = client.post("/save/0", json={"Company": "Acme", "Lead Ranking": "best", "Website": "https://example.com"})
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert calls["count"] <= 1
+
+
+def test_list_files_uses_cached_summary_without_reopening_every_workbook(monkeypatch, tmp_path):
+    monkeypatch.setattr(app_module, "DRAFT_DIR", str(tmp_path))
+    os.makedirs(tmp_path, exist_ok=True)
+
+    client = app_module.app.test_client()
+    with client.session_transaction() as sess:
+        sess["username"] = "uploader"
+
+    draft_name = "uploader_cached_draft.xlsx"
+    draft_path = os.path.join(tmp_path, draft_name)
+    pd.DataFrame({"Company": ["Acme"], "_validated": ["1"]}).to_excel(draft_path, index=False)
+
+    summary_path = os.path.splitext(draft_path)[0] + ".summary.json"
+    with open(summary_path, "w", encoding="utf-8") as summary_file:
+        json.dump({"total": 1, "done": 1, "status": "Completed", "modified_ts": os.path.getmtime(draft_path)}, summary_file)
+
+    import openpyxl
+    calls = {"count": 0}
+    original_load_workbook = openpyxl.load_workbook
+
+    def fake_load_workbook(*args, **kwargs):
+        calls["count"] += 1
+        return original_load_workbook(*args, **kwargs)
+
+    monkeypatch.setattr(openpyxl, "load_workbook", fake_load_workbook)
+
+    response = client.get("/files")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["files"][0]["status"] == "Completed"
+    assert calls["count"] == 0

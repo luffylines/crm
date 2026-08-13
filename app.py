@@ -165,7 +165,44 @@ def safe_write_excel(df, draft_path):
                 pass
 
 
+def is_safe_key(key):
+    """
+    Validate that a file key does not contain path traversal sequences.
+    Prevents attacks like ../user1_file, ..\\user1_file, etc.
+    """
+    if not key:
+        return False
+    safe_key = os.path.basename(str(key))
+    traversal_patterns = ['..', '~', '//', '\\\\']
+    for pattern in traversal_patterns:
+        if pattern in safe_key:
+            return False
+    return safe_key == str(key)
+
+
+def get_user_draft_path(key):
+    """
+    Generate a deterministic file path for a user's draft file.
+    Uses the file_key directly (no auto-incrementing).
+    This should be used for opening/saving/deleting existing files.
+    
+    Format: {DRAFT_DIR}/{username}_{key}_draft.xlsx
+    """
+    user = get_username()
+    if not user or not key:
+        return None
+    if not is_safe_key(key):
+        return None
+    safe_key = os.path.basename(str(key))
+    return os.path.join(DRAFT_DIR, f"{user}_{safe_key}_draft.xlsx")
+
+
 def get_draft_path(filename):
+    """Generate a new draft path (with auto-increment if exists).
+    
+    WARNING: Only use this for NEW file uploads.
+    For existing files, use get_user_draft_path(key) instead.
+    """
     base = os.path.splitext(os.path.basename(filename))[0]
     user = get_username()
     prefix = f"{user}_" if user else ""
@@ -181,6 +218,48 @@ def get_draft_path(filename):
         if not os.path.exists(alt_path):
             return alt_path
         counter += 1
+
+
+def get_draft_summary_path(draft_path):
+    return os.path.splitext(draft_path)[0] + ".summary.json"
+
+
+def build_draft_summary(df, validated=None):
+    validated = validated or set()
+    total_rows = len(df) if df is not None else 0
+    done = sum(1 for i in validated if i < total_rows)
+    status = "Completed" if total_rows > 0 and done >= total_rows else "In Progress"
+    return {
+        "total": total_rows,
+        "done": done,
+        "status": status,
+        "modified_ts": time.time(),
+    }
+
+
+def write_draft_summary(draft_path, df=None, validated=None):
+    if not draft_path:
+        return
+
+    try:
+        summary = build_draft_summary(df, validated)
+        summary_path = get_draft_summary_path(draft_path)
+        with open(summary_path, "w", encoding="utf-8") as summary_file:
+            json.dump(summary, summary_file)
+    except Exception:
+        pass
+
+
+def read_draft_summary(draft_path):
+    summary_path = get_draft_summary_path(draft_path)
+    if not os.path.exists(summary_path):
+        return None
+
+    try:
+        with open(summary_path, "r", encoding="utf-8") as summary_file:
+            return json.load(summary_file)
+    except Exception:
+        return None
 
 
 def get_session_key():
@@ -230,6 +309,29 @@ def save_store(key, store):
             pickle.dump(store, f)
     except Exception:
         pass
+
+
+def flush_store_to_disk(store, *, file_key=None, force=False):
+    if not file_key:
+        return False
+
+    draft_path = get_user_draft_path(file_key)
+    if not draft_path:
+        return False
+
+    now = time.time()
+    last_write = session.get("last_disk_write_ts")
+    if not force and last_write is not None and (now - float(last_write)) < 2.0:
+        save_store(get_session_key(), store)
+        return False
+
+    draft_df = store["df"].copy()
+    draft_df["_validated"] = draft_df.index.map(lambda i: "1" if i in store["validated"] else "")
+    safe_write_excel(draft_df, draft_path)
+    write_draft_summary(draft_path, store["df"], store["validated"])
+    session["last_disk_write_ts"] = now
+    save_store(get_session_key(), store)
+    return True
 
 
 def clean_phone(phone):
@@ -695,6 +797,7 @@ def contactout_enrich_person(row, include_contacts=False):
 
 
 @app.route("/contactout/search", methods=["POST"])
+@login_required
 def contactout_search():
     data = request.get_json(silent=True) or {}
 
@@ -819,62 +922,19 @@ def list_files():
                 modified
             ).strftime("%b %d, %Y %I:%M %p")
 
-            # Default values.
-            total = 0
-            done = 0
+            summary = read_draft_summary(draft_path)
+            if summary is None:
+                try:
+                    df = pd.read_excel(draft_path, dtype=str).fillna("")
+                    validated = set(df.index[df["_validated"] == "1"].tolist()) if "_validated" in df.columns else set()
+                    summary = build_draft_summary(df, validated)
+                    write_draft_summary(draft_path, df, validated)
+                except Exception:
+                    summary = {"total": 0, "done": 0, "status": "In Progress", "modified_ts": modified}
 
-            # Read only the workbook metadata/header first.
-            # Do not load the complete dataframe here.
-            try:
-                import openpyxl
-
-                wb = openpyxl.load_workbook(
-                    draft_path,
-                    read_only=True,
-                    data_only=True
-                )
-
-                ws = wb.active
-
-                # Count rows without creating a pandas DataFrame.
-                total = max(ws.max_row - 1, 0)
-
-                # Find _validated column.
-                headers = [
-                    cell.value
-                    for cell in next(ws.iter_rows(min_row=1, max_row=1))
-                ]
-
-                validated_col = None
-
-                for i, header in enumerate(headers, start=1):
-                    if header == "_validated":
-                        validated_col = i
-                        break
-
-                # Count validated rows.
-                if validated_col:
-                    for row in ws.iter_rows(
-                        min_row=2,
-                        min_col=validated_col,
-                        max_col=validated_col,
-                        values_only=True
-                    ):
-                        if row[0] == "1":
-                            done += 1
-
-                wb.close()
-
-            except Exception as excel_error:
-                print(
-                    f"Excel metadata error for {fname}: "
-                    f"{excel_error}"
-                )
-
-            if done >= total and total > 0:
-                status = "Completed"
-            else:
-                status = "In Progress"
+            total = int(summary.get("total", 0))
+            done = int(summary.get("done", 0))
+            status = summary.get("status", "In Progress")
 
             files.append({
                 "key": base,
@@ -917,11 +977,17 @@ def list_files():
 @login_required
 def open_file(key):
     user = get_username()
-    draft_path = os.path.join(DRAFT_DIR, f"{user}_{key}_draft.xlsx")
-    if not os.path.exists(draft_path):
+    # SECURITY: Validate key against path traversal attacks
+    if not is_safe_key(key):
+        return jsonify({"error": "Invalid file key"}), 400
+    
+    draft_path = get_user_draft_path(key)
+    if not draft_path or not os.path.exists(draft_path):
         return jsonify({"error": "Draft not found"}), 404
 
-    pkl = os.path.join(DRAFT_DIR, f"{user}_{key}.pkl")
+    # Pickle file uses the same user::key format
+    safe_key = os.path.basename(str(key))
+    pkl = os.path.join(DRAFT_DIR, f"{user}_{safe_key}.pkl")
     store_key = f"{user}::{key}"
     if os.path.exists(pkl):
         try:
@@ -966,8 +1032,14 @@ def upload():
         return jsonify({"error": "No file uploaded"}), 400
 
     filename = file.filename
+    # For new uploads, use get_draft_path (which auto-increments if needed)
     draft_path = get_draft_path(filename)
-    key = os.path.splitext(os.path.basename(draft_path))[0].replace("_draft", "")
+    # Extract the key from the path: user_KEY_draft.xlsx -> KEY
+    user = get_username()
+    draft_base = os.path.basename(draft_path)
+    # Format: {user}_{key}_draft.xlsx
+    prefix = f"{user}_"
+    key = draft_base[len(prefix):].replace("_draft.xlsx", "")
 
     df = pd.read_excel(file, dtype=str).fillna("")
     if "be" in df.columns:
@@ -997,9 +1069,10 @@ def upload():
     session["file_key"] = key
     store_key = get_session_key()
     safe_write_excel(df, draft_path)
+    write_draft_summary(draft_path, df, validated)
     save_store(store_key, store)
 
-    return jsonify({"total": len(df), "columns": list(df.columns), "resume_index": resume_index, "resumed": os.path.exists(draft_path)})
+    return jsonify({"total": len(df), "columns": list(df.columns), "resume_index": resume_index, "resumed": os.path.exists(draft_path), "user": user})
 
 
 @app.route("/row/<int:idx>")
@@ -1095,10 +1168,11 @@ def save_row(idx):
     store["df"] = df
 
     key = get_session_key()
-    draft_path = get_draft_path(store["filename"])
-    draft_df = df.copy()
-    draft_df["_validated"] = draft_df.index.map(lambda i: "1" if i in store["validated"] else "")
-    safe_write_excel(draft_df, draft_path)
+    file_key = session.get("file_key")
+    if not file_key:
+        return jsonify({"error": "No file loaded"}), 400
+
+    flush_store_to_disk(store, file_key=file_key)
     save_store(key, store)
 
     return jsonify({"ok": True, "done_count": sum(1 for i in store["validated"] if i < len(df)), "changes_text": changes_text})
@@ -1117,10 +1191,11 @@ def delete_row(idx):
     store["validated"] = {i if i < idx else i - 1 for i in store["validated"] if i != idx}
 
     key = get_session_key()
-    draft_path = get_draft_path(store["filename"])
-    draft_df = df.copy()
-    draft_df["_validated"] = draft_df.index.map(lambda i: "1" if i in store["validated"] else "")
-    safe_write_excel(draft_df, draft_path)
+    file_key = session.get("file_key")
+    if not file_key:
+        return jsonify({"error": "No file loaded"}), 400
+
+    flush_store_to_disk(store, file_key=file_key)
     save_store(key, store)
 
     return jsonify({"ok": True, "total": len(df)})
