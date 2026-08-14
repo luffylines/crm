@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - Lead Revalidation Tool</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .admin-container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .admin-header {
+            background: white;
+            padding: 24px;
+            border-radius: 12px;
+            margin-bottom: 24px;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+        }
+
+        .admin-header h1 {
+            font-size: 28px;
+            color: #1a1a1a;
+            margin-bottom: 8px;
+        }
+
+        .admin-nav {
+            display: flex;
+            gap: 16px;
+            margin-top: 16px;
+            flex-wrap: wrap;
+        }
+
+        .admin-nav a, .admin-nav button {
+            padding: 10px 16px;
+            border: 1px solid #e0e0e0;
+            background: white;
+            border-radius: 6px;
+            cursor: pointer;
+            text-decoration: none;
+            color: #333;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .admin-nav a:hover, .admin-nav button:hover {
+            background: #f5f5f5;
+            border-color: #667eea;
+        }
+
+        .admin-nav a.active {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .admin-nav .logout-btn {
+            background: rgba(239, 68, 68, 0.1);
+            color: #ef4444;
+            border-color: rgba(239, 68, 68, 0.6);
+            margin-left: auto;
+        }
+
+        .admin-nav .logout-btn:hover {
+            background: rgba(239, 68, 68, 0.24);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+            text-align: center;
+        }
+
+        .stat-card .label {
+            font-size: 12px;
+            color: #666;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+
+        .stat-card .value {
+            font-size: 32px;
+            font-weight: 700;
+            color: #667eea;
+        }
+
+        .section {
+            background: white;
+            padding: 24px;
+            border-radius: 12px;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+            margin-bottom: 24px;
+        }
+
+        .section h2 {
+            font-size: 18px;
+            color: #1a1a1a;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+
+        .activity-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .activity-table thead {
+            background: #f8f9fa;
+        }
+
+        .activity-table th {
+            padding: 12px;
+            text-align: left;
+            font-size: 12px;
+            font-weight: 600;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .activity-table td {
+            padding: 12px;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 14px;
+        }
+
+        .activity-table tr:hover {
+            background: #f8f9fa;
+        }
+
+        .action-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .action-login { background: #d1fae5; color: #065f46; }
+        .action-logout { background: #fecaca; color: #7f1d1d; }
+        .action-edit_lead { background: #bfdbfe; color: #1e40af; }
+        .action-save_lead { background: #c7d2fe; color: #312e81; }
+        .action-other { background: #e5e7eb; color: #374151; }
+
+        .user-link {
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        .user-link:hover {
+            text-decoration: underline;
+        }
+
+        .text-muted {
+            color: #999;
+        }
+
+        .time-ago {
+            font-size: 12px;
+            color: #999;
+        }
+
+        @media (max-width: 768px) {
+            .stats-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+
+            .admin-nav {
+                flex-direction: column;
+            }
+
+            .admin-nav .logout-btn {
+                margin-left: 0;
+            }
+
+            .activity-table {
+                font-size: 12px;
+            }
+
+            .activity-table th, .activity-table td {
+                padding: 8px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="admin-container">
+        <div class="admin-header">
+            <h1>Admin Dashboard</h1>
+            <div class="admin-nav">
+                <a href="/admin" class="active">Dashboard</a>
+                <a href="/admin/users">Users</a>
+                <a href="/admin/logs">Activity Logs</a>
+                <a href="/">Back to App</a>
+                <button class="logout-btn" onclick="logout()">Logout</button>
+            </div>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="label">Total Users</div>
+                <div class="value">{{ total_users }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Active Users</div>
+                <div class="value">{{ active_users }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Inactive Users</div>
+                <div class="value">{{ inactive_users }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Total Leads</div>
+                <div class="value">{{ total_leads }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Validated Leads</div>
+                <div class="value">{{ validated_leads }}</div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Recent Activity</h2>
+            <table class="activity-table">
+                <thead>
+                    <tr>
+                        <th>Date/Time</th>
+                        <th>User</th>
+                        <th>Action</th>
+                        <th>Description</th>
+                        <th>IP Address</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% if recent_activity %}
+                        {% for log in recent_activity %}
+                        <tr>
+                            <td class="time-ago" title="{{ log.created_at }}">
+                                {{ log.created_at[:19] }}
+                            </td>
+                            <td>
+                                <a href="/admin/logs?user={{ log.username }}" class="user-link">
+                                    {{ log.username }}
+                                </a>
+                            </td>
+                            <td>
+                                <span class="action-badge action-{% if 'LOGIN' in log.action %}login{% elif 'LOGOUT' in log.action %}logout{% elif 'EDIT' in log.action %}edit_lead{% elif 'SAVE' in log.action %}save_lead{% else %}other{% endif %}">
+                                    {{ log.action }}
+                                </span>
+                            </td>
+                            <td>{{ log.description }}</td>
+                            <td class="text-muted">{{ log.ip_address or 'N/A' }}</td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                    <tr>
+                        <td colspan="5" style="text-align: center; color: #999; padding: 20px;">
+                            No activity yet
+                        </td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        function logout() {
+            fetch('/logout', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            }).then(() => {
+                window.location.href = '/';
+            });
+        }
+    </script>
+</body>
+</html>

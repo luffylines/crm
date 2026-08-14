@@ -399,9 +399,14 @@
       onclick="goFiles()">
       Files
     </button>
+    
     <button class="tab-btn nav-btn" data-nav="contacts" onclick="goContacts()">
-  Contacts
-  </button>
+      Contacts
+    </button>
+    
+    <a id="adminLink" class="tab-btn nav-btn" href="/admin" style="display:none; text-decoration:none; color:inherit;">
+      ⚙ Admin
+    </a>
 
     <div class="tab-btns" id="tabBtns" style="display:none">
 
@@ -791,7 +796,7 @@
   </div>
 
   <script>
-    let currentIndex=0, totalRows=0, currentRow={}, resumeIndex=0, sidebarVisible=true, allPreviewData=[], currentUser='';
+    let currentIndex=0, totalRows=0, currentRow={}, resumeIndex=0, sidebarVisible=true, allPreviewData=[], currentUser='', userRole='';
     let lastContactSearch = null;
     let lastContactProfile = null;
     const PREVIEW_COLS=["Company","Website","Lead Ranking","No. of Employees","Company Industry","First Name","Last Name","Title","Email","Phone","Alt. Contact Info","Alternate Phone","Street","City","State","Zip Code","Timezone","Validated By","Validated Date","Notes"];
@@ -1028,6 +1033,7 @@
     fetch('/me').then(r=>r.json()).then(data=>{
       if(data.logged_in){
         currentUser = data.username;
+        userRole = data.role || '';
         showApp();
       } else {
         showLogin();
@@ -1054,6 +1060,13 @@
       document.getElementById('loginScreen').style.display='none';
       document.getElementById('userChip').style.display='block';
       document.getElementById('validatedBy').value=currentUser;
+      
+      // Show admin dashboard link for admin users
+      const adminLink = document.getElementById('adminLink');
+      if(adminLink){
+        adminLink.style.display = userRole === 'Admin' ? 'block' : 'none';
+      }
+      
       setNavState('home');
       goHome();
       loadHomeStats();
@@ -1076,6 +1089,7 @@
         .then(r=>r.json()).then(data=>{
           if(data.ok){
             currentUser=data.username;
+            userRole=data.role || '';
             document.getElementById('loginErr').style.display='none';
             showApp();
           } else {
@@ -1087,6 +1101,7 @@
     function doLogout(){
       fetch('/logout',{method:'POST'}).then(()=>{
         currentUser='';
+        userRole='';
         goHome();
         showLogin();
       });

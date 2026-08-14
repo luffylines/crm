@@ -6,12 +6,487 @@ bawal yung gov email
 119 - pang 30 na
 187 - plus 17
 
-<neonathannavera.cpoaglobal@gmail.com>
-Asia Maniego <asiamaniego.cpoaglobal@gmail.com>,
-Rjacosta@cpoaglobal.com,
-Ryan Jay Acosta <ryanjay.cpoaglobal@gmail.com>,
-Bryan James Gerolia <bryanjamesgerolia.cpoaglobal@gmail.com>,
-Jay Reuben Yangco <jayreubenyangco.cpoaglobal@gmail.com>,
-Christina <christina.cpoa@gmail.com>,
-jnsalvador@llholdingsinc.com,
-Vincent Olequino <vincentolequino.cpoaglobal@gmail.com>,
+--------------------------------------------------------
+My existing application is built with:
+
+* Python Flask
+* HTML
+* CSS
+* JavaScript
+* Deployed on Render
+
+I want to add an Admin Dashboard, User Management system, and Activity/Audit Logs to the EXISTING Flask application.
+
+IMPORTANT:
+Do not rebuild the application from scratch.
+Do not create a separate demo application.
+Inspect the existing Flask project first and integrate everything into the current architecture.
+
+## EXISTING APPLICATION
+
+The current application is a Lead Revalidation Tool.
+
+Keep all existing functionality working, including:
+
+* Lead validation
+* Lead editing
+* Lead saving
+* Company information
+* Contact information
+* Ranking
+* Existing navigation
+* Existing authentication/session system
+* Existing database
+
+Do not redesign the existing Lead Revalidation UI.
+
+---
+
+# 1. ADMIN AUTHENTICATION
+
+Add role-based authentication to the existing Flask login system.
+
+Roles:
+
+* Admin
+* User
+* Viewer
+
+Admin:
+
+* Full access
+* Admin Dashboard
+* User Management
+* Activity Logs
+* Existing Lead Revalidation Tool
+
+User:
+
+* Existing lead validation functionality
+* Cannot access Admin Dashboard
+* Cannot manage users
+* Cannot view audit logs
+
+Viewer:
+
+* View-only access where appropriate
+* Cannot modify users or lead data
+
+IMPORTANT:
+Enforce permissions in Flask backend routes using decorators or equivalent authorization middleware.
+
+Do NOT rely only on hiding frontend buttons.
+
+A normal user who manually enters `/admin` should still receive an authorization error/redirect.
+
+---
+
+# 2. ADMIN DASHBOARD
+
+Create Flask routes such as:
+
+/admin
+/admin/users
+/admin/logs
+
+Use the existing Flask templates and styling where possible.
+
+Admin Dashboard should contain:
+
+* Total Users
+* Active Users
+* Inactive Users
+* Total Leads
+* Validated Leads
+* Recent Activity
+
+Example layout:
+
+ADMIN DASHBOARD
+
+[ Total Users ] [ Active Users ] [ Total Leads ] [ Validated ]
+
+Recent Activity:
+
+User | Action | Description | Date/Time | IP Address
+
+Keep the design consistent with the existing application.
+
+---
+
+# 3. USER MANAGEMENT
+
+Create:
+
+/admin/users
+
+Admin can:
+
+* Add User
+* Edit User
+* Deactivate User
+* Reactivate User
+* Reset Password
+* Change Role
+
+User table:
+
+Name | Username | Role | Status | Last Login | Actions
+
+Do NOT permanently delete users by default.
+
+Use an active/inactive status so historical audit logs remain associated with the user.
+
+Passwords must NEVER be stored as plain text.
+
+Use Werkzeug password hashing such as:
+
+generate_password_hash()
+check_password_hash()
+
+or the existing secure password hashing mechanism if one already exists.
+
+---
+
+# 4. DATABASE
+
+Inspect the existing database first.
+
+If the application already uses PostgreSQL or SQLAlchemy:
+
+EXTEND THE EXISTING DATABASE.
+
+Do NOT create a second database system.
+
+If SQLAlchemy is already being used, create appropriate models such as:
+
+User
+ActivityLog
+
+Example User fields:
+
+* id
+* username
+* password_hash
+* role
+* is_active
+* created_at
+* updated_at
+* last_login
+
+Example ActivityLog fields:
+
+* id
+* user_id
+* action
+* description
+* lead_id (nullable)
+* ip_address
+* user_agent
+* created_at
+
+Use proper foreign keys and indexes.
+
+If migrations are already used, create a migration instead of manually destroying/recreating the database.
+
+---
+
+# 5. ACTIVITY / AUDIT LOGGING
+
+Create a reusable Flask audit logging function/helper.
+
+For example:
+
+log_activity(
+user=current_user,
+action="EDIT_LEAD",
+description="Edited lead information",
+lead_id=lead.id
+)
+
+Log these events:
+
+AUTHENTICATION:
+
+* LOGIN
+* LOGOUT
+* FAILED_LOGIN
+
+USER MANAGEMENT:
+
+* CREATE_USER
+* EDIT_USER
+* DEACTIVATE_USER
+* REACTIVATE_USER
+* RESET_PASSWORD
+* CHANGE_ROLE
+
+LEAD ACTIVITY:
+
+* VIEW_LEAD
+* EDIT_LEAD
+* SAVE_LEAD
+* DELETE_LEAD
+* VALIDATE_LEAD
+* CHANGE_RANKING
+
+Capture the IP address server-side using Flask's request object.
+
+For example:
+
+request.remote_addr
+
+Also record the user agent when available.
+
+Do not trust an IP address sent by the frontend.
+
+---
+
+# 6. ACTIVITY LOG PAGE
+
+Create:
+
+/admin/logs
+
+Display:
+
+Date/Time
+User
+Action
+Description
+Lead
+IP Address
+
+Example:
+
+2026-08-14 00:31
+john
+LOGIN
+User logged in
+--------------
+
+xxx.xxx.xxx.xxx
+
+2026-08-14 00:35
+john
+EDIT_LEAD
+Edited Electro Rep
+Electro Rep
+xxx.xxx.xxx.xxx
+
+2026-08-14 00:36
+john
+SAVE_LEAD
+Saved Electro Rep
+Electro Rep
+xxx.xxx.xxx.xxx
+
+Add:
+
+* Search
+* User filter
+* Action filter
+* Date range filter
+* Pagination
+
+Do not load thousands of logs into the browser at once.
+
+Use server-side pagination.
+
+---
+
+# 7. AUDIT LOG DETAILS
+
+When an Admin clicks an activity log, show more information.
+
+For lead edits, if practical, show the changed fields.
+
+Example:
+
+User: John
+Action: EDIT_LEAD
+Lead: Electro Rep
+Date/Time: 2026-08-14 00:36
+IP Address: xxx.xxx.xxx.xxx
+
+Changes:
+
+Ranking:
+Before: GOOD
+After: BAD
+
+Do not store sensitive passwords or other credentials in audit logs.
+
+---
+
+# 8. LAST LOGIN
+
+When a user successfully logs in:
+
+Update:
+
+last_login
+
+Also create:
+
+LOGIN
+
+activity log.
+
+When they log out:
+
+Create:
+
+LOGOUT
+
+activity log.
+
+Important:
+If the user closes their browser without explicitly logging out, do not pretend that a logout event occurred.
+
+Only log LOGOUT when the logout route is actually called.
+
+---
+
+# 9. RENDER DEPLOYMENT
+
+The application is deployed on Render.
+
+Make sure the implementation is production-safe for Render.
+
+If the application already uses Render PostgreSQL, use the existing PostgreSQL database.
+
+Do NOT introduce SQLite as the production database.
+
+Use environment variables for:
+
+* DATABASE_URL
+* SECRET_KEY
+* Any other sensitive configuration
+
+Do NOT hardcode passwords, secret keys, database credentials, or API keys.
+
+If database migrations are needed, explain the exact migration/deployment steps needed for Render.
+
+---
+
+# 10. IP ADDRESS
+
+Record the IP address on the server side.
+
+Because the application is behind Render's proxy, inspect the existing deployment configuration before deciding whether to use request.remote_addr or a trusted proxy configuration.
+
+Do NOT blindly trust arbitrary X-Forwarded-For headers.
+
+Only use forwarded IP headers when the proxy configuration is properly trusted.
+
+---
+
+# 11. ADMIN NAVIGATION
+
+For Admin users, add:
+
+Admin Dashboard
+Users
+Activity Logs
+
+For regular users:
+
+Do NOT display the Admin navigation.
+
+But more importantly, protect the routes server-side as well.
+
+---
+
+# 12. RESPONSIVE ADMIN UI
+
+The Admin Dashboard must work on:
+
+Desktop
+Tablet
+Android
+iPhone
+
+Desktop:
+
+* Sidebar/navigation
+* Dashboard cards
+* Data tables
+
+Mobile:
+
+* Cards stack vertically
+* Navigation becomes mobile-friendly
+* Tables can become horizontally scrollable or responsive cards
+* Buttons remain touch-friendly
+* No important content is clipped
+
+Use the existing CSS style instead of introducing an unrelated design system.
+
+---
+
+# 13. SECURITY
+
+Implement:
+
+* Password hashing
+* Role-based authorization
+* Server-side permission checks
+* CSRF protection for forms if the existing application supports it / use Flask-WTF where appropriate
+* Server-side validation
+* Secure session configuration
+* No plaintext passwords
+* No secrets committed to source code
+
+Do not expose audit logs to normal users.
+
+---
+
+# 14. IMPLEMENTATION PROCESS
+
+Before changing anything:
+
+1. Inspect the existing Flask app structure.
+2. Find the current login/authentication code.
+3. Find the current User model/database table.
+4. Find the existing lead model/table.
+5. Find the lead save/edit/validation routes.
+6. Identify whether SQLAlchemy is already being used.
+7. Identify whether Flask-Migrate is already being used.
+8. Identify the existing templates/base.html/navigation.
+9. Identify the existing Render database configuration.
+
+Then integrate the Admin system into the existing code.
+
+Do not duplicate existing models, routes, authentication, or database connections.
+
+After implementation, show me:
+
+1. Files that were modified
+2. Files that were created
+3. Database changes/migrations
+4. Any Render environment variables required
+5. Any commands I need to run for deployment
+
+Finally test:
+
+* Admin login
+* User login
+* Viewer login
+* Unauthorized `/admin` access
+* Add user
+* Edit user
+* Deactivate user
+* Reactivate user
+* Reset password
+* Login audit log
+* Logout audit log
+* Lead edit audit log
+* Lead save audit log
+* Lead validation audit log
+* IP address logging
+* Activity log filters
+* Pagination
+* Mobile Admin Dashboard
+
+Do not modify existing Lead Revalidation behavior unless it is required to connect the audit logging system.

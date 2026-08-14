@@ -7,7 +7,7 @@ import os
 import json
 import pickle
 import stat
-from datetime import datetime
+from datetime import datetime, timedelta
 from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut
 import time
@@ -21,6 +21,17 @@ except ImportError:  # pragma: no cover - fallback when python-dotenv is not ins
 
 dotenv_path = os.path.join(os.path.dirname(__file__), ".env")
 load_dotenv(dotenv_path)
+
+# Import models and auth helpers
+from models import db, User, ActivityLog
+from auth_helpers import (
+    login_required as auth_login_required,
+    admin_required,
+    viewer_required,
+    get_current_user,
+    log_activity,
+    get_client_ip
+)
 
 def _clean_api_key(value):
     if value is None:
@@ -46,6 +57,21 @@ app = Flask(__name__)
 
 app.config["SECRET_KEY"] = os.getenv("FLASK_SECRET_KEY")
 
+# Database configuration
+DATABASE_URL = os.getenv("DATABASE_URL")
+if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
+    # Fix postgres:// to postgresql:// for modern SQLAlchemy
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URL or "sqlite:///crm.db"
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+# Initialize database
+db.init_app(app)
+
+# Create tables on app startup
+with app.app_context():
+    db.create_all()
+
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SECURE=True,
@@ -58,12 +84,6 @@ os.makedirs(DRAFT_DIR, exist_ok=True)
 
 # Per-file in-memory store: { session_key: { df, original_df, filename, validated } }
 stores = {}
-
-
-def load_users():
-    path = os.path.join(os.path.dirname(__file__), "users.json")
-    with open(path) as f:
-        return {u["username"]: u["password"] for u in json.load(f)["users"]}
 
 
 def normalize_company_fields(df):
@@ -92,12 +112,8 @@ def normalize_company_fields(df):
 
 
 def login_required(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if not session.get("username"):
-            return jsonify({"error": "Not logged in"}), 401
-        return f(*args, **kwargs)
-    return decorated
+    """Wrapper for backward compatibility - uses new auth system."""
+    return auth_login_required(f)
 
 
 def get_username():
@@ -860,21 +876,45 @@ def contactout_enrich(idx):
 def login():
     data = request.json or {}
 
-    users = load_users()
-
     username = data.get("username", "").strip().lower()
     password = data.get("password", "")
 
-    if username in users and users[username] == password:
-        session.clear()
+    if not username or not password:
+        return jsonify({
+            "error": "Username and password required"
+        }), 400
 
+    # Query user from database
+    user = User.query.filter_by(username=username).first()
+
+    if user and user.is_active and user.check_password(password):
+        session.clear()
         session["username"] = username
         session.permanent = True
 
+        # Update last login
+        user.last_login = datetime.utcnow()
+        db.session.commit()
+
+        # Log the login activity
+        log_activity(
+            user=user,
+            action="LOGIN",
+            description=f"User {username} logged in"
+        )
+
         return jsonify({
             "ok": True,
-            "username": username
+            "username": username,
+            "role": user.role
         })
+
+    # Log failed login attempt
+    log_activity(
+        user=username,
+        action="FAILED_LOGIN",
+        description=f"Failed login attempt for user {username}"
+    ) if username else None
 
     return jsonify({
         "error": "Invalid username or password"
@@ -882,6 +922,13 @@ def login():
 
 @app.route("/logout", methods=["POST"])
 def logout():
+    username = session.get("username")
+    if username:
+        log_activity(
+            user=username,
+            action="LOGOUT",
+            description=f"User {username} logged out"
+        )
     session.clear()
     return jsonify({"ok": True})
 
@@ -891,7 +938,16 @@ def me():
     username = session.get("username")
     if not username:
         return jsonify({"logged_in": False})
-    return jsonify({"logged_in": True, "username": username})
+    
+    user = User.query.filter_by(username=username).first()
+    if not user or not user.is_active:
+        return jsonify({"logged_in": False})
+    
+    return jsonify({
+        "logged_in": True,
+        "username": username,
+        "role": user.role
+    })
 
 
 @app.route("/")
@@ -1125,6 +1181,10 @@ def save_row(idx):
     changed, added, removed = [], [], []
     TRACK_COLS = ["Website", "No. of Employees", "Company Industry", "First Name", "Last Name",
                   "Title", "Email", "Phone", "Alt. Contact Info", "Alternate Phone", "Street", "City", "State", "Zip Code"]
+    
+    # Track changes for audit log
+    changes_dict = {}
+    
     if original_df is not None and idx < len(original_df):
         orig_row = original_df.iloc[idx]
         for col in TRACK_COLS:
@@ -1132,10 +1192,13 @@ def save_row(idx):
             old_val = str(orig_row.get(col, "")).strip() if col in orig_row else ""
             if old_val and not new_val:
                 removed.append(col)
+                changes_dict[col] = {"before": old_val, "after": ""}
             elif not old_val and new_val:
                 added.append(col)
+                changes_dict[col] = {"before": "", "after": new_val}
             elif old_val and new_val and old_val != new_val:
                 changed.append(col)
+                changes_dict[col] = {"before": old_val, "after": new_val}
 
     parts = []
     if changed: parts.append("Changes: " + ", ".join(changed))
@@ -1175,6 +1238,16 @@ def save_row(idx):
     flush_store_to_disk(store, file_key=file_key)
     save_store(key, store)
 
+    # Log the save activity
+    company_name = data.get("Company", "Unknown")
+    log_activity(
+        user=get_current_user(),
+        action="SAVE_LEAD",
+        description=f"Saved lead: {company_name}",
+        lead_id=file_key,
+        changes=changes_dict if changes_dict else None
+    )
+
     return jsonify({"ok": True, "done_count": sum(1 for i in store["validated"] if i < len(df)), "changes_text": changes_text})
 
 
@@ -1184,6 +1257,11 @@ def delete_row(idx):
     store = get_store()
     if not store:
         return jsonify({"error": "No file loaded"}), 400
+    
+    # Get company name before deletion for audit log
+    company_name = store["df"].iloc[idx].get("Company", "Unknown") if idx < len(store["df"]) else "Unknown"
+    file_key = session.get("file_key", "Unknown")
+    
     df = store["df"].drop(index=idx).reset_index(drop=True)
     store["df"] = df
     if store.get("original_df") is not None:
@@ -1191,7 +1269,6 @@ def delete_row(idx):
     store["validated"] = {i if i < idx else i - 1 for i in store["validated"] if i != idx}
 
     key = get_session_key()
-    file_key = session.get("file_key")
     if not file_key:
         return jsonify({"error": "No file loaded"}), 400
 
@@ -1215,6 +1292,274 @@ def download():
     filename = store["filename"].replace(".xlsx", "_validated.xlsx")
     return send_file(output, download_name=filename, as_attachment=True,
                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+# ============================================================================
+# ADMIN DASHBOARD ROUTES
+# ============================================================================
+
+@app.route("/admin")
+@admin_required
+def admin_dashboard():
+    """Admin Dashboard with statistics."""
+    try:
+        total_users = User.query.count()
+        active_users = User.query.filter_by(is_active=True).count()
+        inactive_users = total_users - active_users
+        
+        # Count leads (files) from drafts directory
+        total_leads = 0
+        validated_leads = 0
+        
+        for fname in os.listdir(DRAFT_DIR):
+            if fname.endswith("_draft.xlsx"):
+                total_leads += 1
+                try:
+                    df = pd.read_excel(os.path.join(DRAFT_DIR, fname), dtype=str).fillna("")
+                    if "_validated" in df.columns:
+                        validated_leads += sum(1 for v in df["_validated"] if v == "1")
+                except Exception:
+                    pass
+        
+        # Recent activity (last 10 logs)
+        recent_activity = ActivityLog.query.order_by(ActivityLog.created_at.desc()).limit(10).all()
+        recent_activity_data = [log.to_dict() for log in recent_activity]
+        
+        return render_template("admin/dashboard.html", 
+                             total_users=total_users,
+                             active_users=active_users,
+                             inactive_users=inactive_users,
+                             total_leads=total_leads,
+                             validated_leads=validated_leads,
+                             recent_activity=recent_activity_data)
+    except Exception as e:
+        print(f"Error rendering admin dashboard: {e}")
+        return jsonify({"error": "Error loading dashboard"}), 500
+
+
+@app.route("/admin/users")
+@admin_required
+def admin_users():
+    """User Management page."""
+    try:
+        page = request.args.get("page", 1, type=int)
+        per_page = 10
+        
+        users_paginated = User.query.order_by(User.created_at.desc()).paginate(
+            page=page, per_page=per_page, error_out=False
+        )
+        
+        users = [user.to_dict() for user in users_paginated.items]
+        
+        return render_template("admin/users.html",
+                             users=users,
+                             page=page,
+                             total_pages=users_paginated.pages,
+                             total_users=users_paginated.total)
+    except Exception as e:
+        print(f"Error rendering user management: {e}")
+        return jsonify({"error": "Error loading users"}), 500
+
+
+@app.route("/admin/logs")
+@admin_required
+def admin_logs():
+    """Activity Logs page."""
+    try:
+        page = request.args.get("page", 1, type=int)
+        per_page = 20
+        user_filter = request.args.get("user", "")
+        action_filter = request.args.get("action", "")
+        
+        query = ActivityLog.query
+        
+        if user_filter:
+            user = User.query.filter_by(username=user_filter).first()
+            if user:
+                query = query.filter_by(user_id=user.id)
+        
+        if action_filter:
+            query = query.filter_by(action=action_filter)
+        
+        logs_paginated = query.order_by(ActivityLog.created_at.desc()).paginate(
+            page=page, per_page=per_page, error_out=False
+        )
+        
+        logs = [log.to_dict() for log in logs_paginated.items]
+        
+        # Get unique actions and users for filters
+        all_actions = db.session.query(ActivityLog.action).distinct().all()
+        actions = [a[0] for a in all_actions]
+        
+        all_users = User.query.all()
+        usernames = [u.username for u in all_users]
+        
+        return render_template("admin/logs.html",
+                             logs=logs,
+                             page=page,
+                             total_pages=logs_paginated.pages,
+                             total_logs=logs_paginated.total,
+                             user_filter=user_filter,
+                             action_filter=action_filter,
+                             available_actions=actions,
+                             available_users=usernames)
+    except Exception as e:
+        print(f"Error rendering activity logs: {e}")
+        return jsonify({"error": "Error loading logs"}), 500
+
+
+# ============================================================================
+# ADMIN API ROUTES (for user management operations)
+# ============================================================================
+
+@app.route("/api/admin/users", methods=["POST"])
+@admin_required
+def api_create_user():
+    """Create a new user."""
+    try:
+        data = request.json or {}
+        username = data.get("username", "").strip().lower()
+        password = data.get("password", "").strip()
+        role = data.get("role", "User")
+        
+        if not username or not password:
+            return jsonify({"error": "Username and password required"}), 400
+        
+        if role not in ["Admin", "User", "Viewer"]:
+            return jsonify({"error": "Invalid role"}), 400
+        
+        # Check if user already exists
+        existing = User.query.filter_by(username=username).first()
+        if existing:
+            return jsonify({"error": "User already exists"}), 409
+        
+        # Create new user
+        user = User(username=username, role=role, is_active=True)
+        user.set_password(password)
+        db.session.add(user)
+        db.session.commit()
+        
+        # Log the activity
+        current_user = get_current_user()
+        log_activity(
+            user=current_user,
+            action="CREATE_USER",
+            description=f"Created user {username} with role {role}"
+        )
+        
+        return jsonify({"ok": True, "user": user.to_dict()}), 201
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error creating user: {e}")
+        return jsonify({"error": "Error creating user"}), 500
+
+
+@app.route("/api/admin/users/<int:user_id>", methods=["PUT"])
+@admin_required
+def api_update_user(user_id):
+    """Update an existing user."""
+    try:
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+        
+        data = request.json or {}
+        
+        if "role" in data:
+            role = data.get("role")
+            if role not in ["Admin", "User", "Viewer"]:
+                return jsonify({"error": "Invalid role"}), 400
+            user.role = role
+            
+            # Log role change
+            current_user = get_current_user()
+            log_activity(
+                user=current_user,
+                action="CHANGE_ROLE",
+                description=f"Changed {user.username}'s role to {role}"
+            )
+        
+        if "password" in data:
+            password = data.get("password", "").strip()
+            if password:
+                user.set_password(password)
+                
+                # Log password reset
+                current_user = get_current_user()
+                log_activity(
+                    user=current_user,
+                    action="RESET_PASSWORD",
+                    description=f"Reset password for user {user.username}"
+                )
+        
+        user.updated_at = datetime.utcnow()
+        db.session.commit()
+        
+        return jsonify({"ok": True, "user": user.to_dict()})
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error updating user: {e}")
+        return jsonify({"error": "Error updating user"}), 500
+
+
+@app.route("/api/admin/users/<int:user_id>/deactivate", methods=["POST"])
+@admin_required
+def api_deactivate_user(user_id):
+    """Deactivate a user."""
+    try:
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+        
+        # Prevent self-deactivation
+        current_user = get_current_user()
+        if user.id == current_user.id:
+            return jsonify({"error": "Cannot deactivate yourself"}), 400
+        
+        user.is_active = False
+        user.updated_at = datetime.utcnow()
+        db.session.commit()
+        
+        # Log the activity
+        log_activity(
+            user=current_user,
+            action="DEACTIVATE_USER",
+            description=f"Deactivated user {user.username}"
+        )
+        
+        return jsonify({"ok": True, "user": user.to_dict()})
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error deactivating user: {e}")
+        return jsonify({"error": "Error deactivating user"}), 500
+
+
+@app.route("/api/admin/users/<int:user_id>/reactivate", methods=["POST"])
+@admin_required
+def api_reactivate_user(user_id):
+    """Reactivate a user."""
+    try:
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+        
+        user.is_active = True
+        user.updated_at = datetime.utcnow()
+        db.session.commit()
+        
+        # Log the activity
+        current_user = get_current_user()
+        log_activity(
+            user=current_user,
+            action="REACTIVATE_USER",
+            description=f"Reactivated user {user.username}"
+        )
+        
+        return jsonify({"ok": True, "user": user.to_dict()})
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error reactivating user: {e}")
+        return jsonify({"error": "Error reactivating user"}), 500
 
 
 if __name__ == "__main__":

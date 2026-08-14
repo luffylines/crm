@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Activity Logs - Admin Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .admin-container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .admin-header {
+            background: white;
+            padding: 24px;
+            border-radius: 12px;
+            margin-bottom: 24px;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+        }
+
+        .admin-header h1 {
+            font-size: 28px;
+            color: #1a1a1a;
+            margin-bottom: 8px;
+        }
+
+        .admin-nav {
+            display: flex;
+            gap: 16px;
+            margin-top: 16px;
+            flex-wrap: wrap;
+        }
+
+        .admin-nav a, .admin-nav button {
+            padding: 10px 16px;
+            border: 1px solid #e0e0e0;
+            background: white;
+            border-radius: 6px;
+            cursor: pointer;
+            text-decoration: none;
+            color: #333;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .admin-nav a:hover, .admin-nav button:hover {
+            background: #f5f5f5;
+            border-color: #667eea;
+        }
+
+        .admin-nav a.active {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .admin-nav .logout-btn {
+            background: rgba(239, 68, 68, 0.1);
+            color: #ef4444;
+            border-color: rgba(239, 68, 68, 0.6);
+            margin-left: auto;
+        }
+
+        .admin-nav .logout-btn:hover {
+            background: rgba(239, 68, 68, 0.24);
+        }
+
+        .section {
+            background: white;
+            padding: 24px;
+            border-radius: 12px;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+            margin-bottom: 24px;
+        }
+
+        .section h2 {
+            font-size: 18px;
+            color: #1a1a1a;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+
+        .filters {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .filter-group {
+            flex: 1;
+            min-width: 200px;
+        }
+
+        .filter-group label {
+            display: block;
+            font-size: 12px;
+            font-weight: 600;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+        }
+
+        .filter-group select,
+        .filter-group input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: inherit;
+        }
+
+        .filter-group select:focus,
+        .filter-group input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .btn-filter {
+            padding: 10px 16px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+            align-self: flex-end;
+        }
+
+        .btn-filter:hover {
+            background: #5568d3;
+        }
+
+        .btn-clear {
+            padding: 10px 16px;
+            background: #f0f0f0;
+            color: #333;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .btn-clear:hover {
+            background: #e0e0e0;
+        }
+
+        .logs-table {
+            width: 100%;
+            border-collapse: collapse;
+            overflow-x: auto;
+        }
+
+        .logs-table thead {
+            background: #f8f9fa;
+        }
+
+        .logs-table th {
+            padding: 12px;
+            text-align: left;
+            font-size: 12px;
+            font-weight: 600;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .logs-table td {
+            padding: 12px;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        .logs-table tr:hover {
+            background: #f8f9fa;
+        }
+
+        .logs-table tr:hover td {
+            cursor: pointer;
+        }
+
+        .action-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .action-login { background: #d1fae5; color: #065f46; }
+        .action-logout { background: #fecaca; color: #7f1d1d; }
+        .action-create_user { background: #c7d2fe; color: #312e81; }
+        .action-edit_lead { background: #bfdbfe; color: #1e40af; }
+        .action-save_lead { background: #c7d2fe; color: #312e81; }
+        .action-validate_lead { background: #d1d5db; color: #1f2937; }
+        .action-change_role { background: #fed7aa; color: #7c2d12; }
+        .action-reset_password { background: #fca5a5; color: #7f1d1d; }
+        .action-deactivate_user { background: #fecaca; color: #7f1d1d; }
+        .action-reactivate_user { background: #d1fae5; color: #065f46; }
+        .action-other { background: #e5e7eb; color: #374151; }
+
+        .user-link {
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        .user-link:hover {
+            text-decoration: underline;
+        }
+
+        .text-muted {
+            color: #999;
+            font-size: 12px;
+        }
+
+        .time-ago {
+            font-size: 12px;
+            color: #999;
+        }
+
+        .pagination {
+            display: flex;
+            justify-content: center;
+            gap: 8px;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+
+        .pagination a, .pagination span {
+            padding: 8px 12px;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            text-decoration: none;
+            color: #333;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .pagination a:hover {
+            background: #f0f0f0;
+        }
+
+        .pagination .active {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .pagination .disabled {
+            color: #ccc;
+            cursor: not-allowed;
+        }
+
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.4);
+            animation: fadeIn 0.3s;
+            overflow-y: auto;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .modal.show {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-content {
+            background-color: white;
+            padding: 24px;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 600px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+            animation: slideIn 0.3s;
+            margin: 20px auto;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateY(-50px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .modal-header {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 20px;
+            color: #1a1a1a;
+            border-bottom: 2px solid #f0f0f0;
+            padding-bottom: 12px;
+        }
+
+        .modal-body {
+            margin-bottom: 20px;
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+
+        .modal-footer {
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+        }
+
+        .log-detail {
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .log-detail:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+
+        .log-detail-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+        }
+
+        .log-detail-value {
+            font-size: 14px;
+            color: #333;
+            word-break: break-all;
+            padding: 8px;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+
+        .btn-secondary {
+            padding: 10px 16px;
+            background: #f0f0f0;
+            color: #333;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .btn-secondary:hover {
+            background: #e0e0e0;
+        }
+
+        .no-logs {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        @media (max-width: 768px) {
+            .admin-header {
+                padding: 16px;
+            }
+
+            .admin-header h1 {
+                font-size: 20px;
+            }
+
+            .admin-nav {
+                flex-direction: column;
+            }
+
+            .admin-nav .logout-btn {
+                margin-left: 0;
+            }
+
+            .section {
+                padding: 16px;
+            }
+
+            .filters {
+                flex-direction: column;
+            }
+
+            .filter-group {
+                width: 100%;
+            }
+
+            .btn-filter,
+            .btn-clear {
+                width: 100%;
+            }
+
+            .logs-table {
+                font-size: 12px;
+            }
+
+            .logs-table th,
+            .logs-table td {
+                padding: 8px;
+            }
+
+            .modal-content {
+                width: 95%;
+                padding: 16px;
+                margin: 10px auto;
+            }
+
+            .modal-header {
+                font-size: 16px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="admin-container">
+        <div class="admin-header">
+            <h1>Activity Logs</h1>
+            <div class="admin-nav">
+                <a href="/admin">Dashboard</a>
+                <a href="/admin/users">Users</a>
+                <a href="/admin/logs" class="active">Activity Logs</a>
+                <a href="/">Back to App</a>
+                <button class="logout-btn" onclick="logout()">Logout</button>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Filter Logs</h2>
+            <form method="GET" class="filters">
+                <div class="filter-group">
+                    <label for="userFilter">User:</label>
+                    <select id="userFilter" name="user">
+                        <option value="">All Users</option>
+                        {% for username in available_users %}
+                        <option value="{{ username }}" {% if username == user_filter %}selected{% endif %}>
+                            {{ username }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="actionFilter">Action:</label>
+                    <select id="actionFilter" name="action">
+                        <option value="">All Actions</option>
+                        {% for action in available_actions %}
+                        <option value="{{ action }}" {% if action == action_filter %}selected{% endif %}>
+                            {{ action }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <button type="submit" class="btn-filter">Filter</button>
+                <a href="/admin/logs" class="btn-clear">Clear Filters</a>
+            </form>
+        </div>
+
+        <div class="section">
+            <h2>Activity Logs ({{ total_logs }} total)</h2>
+
+            {% if logs %}
+            <div style="overflow-x: auto;">
+                <table class="logs-table">
+                    <thead>
+                        <tr>
+                            <th>Date/Time</th>
+                            <th>User</th>
+                            <th>Action</th>
+                            <th>Description</th>
+                            <th>IP Address</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for log in logs %}
+                        <tr onclick="viewLogDetails(this)" style="cursor: pointer;" title="Click to view details">
+                            <td class="time-ago" data-log-id="{{ log.id }}">
+                                {{ log.created_at[:19] }}
+                            </td>
+                            <td>
+                                <a href="?user={{ log.username }}" class="user-link" onclick="event.stopPropagation();">
+                                    {{ log.username }}
+                                </a>
+                            </td>
+                            <td>
+                                <span class="action-badge action-{% if 'LOGIN' in log.action %}login{% elif 'LOGOUT' in log.action %}logout{% elif 'CREATE' in log.action %}create_user{% elif 'EDIT' in log.action %}edit_lead{% elif 'SAVE' in log.action %}save_lead{% elif 'VALIDATE' in log.action %}validate_lead{% elif 'CHANGE_ROLE' in log.action %}change_role{% elif 'RESET_PASSWORD' in log.action %}reset_password{% elif 'DEACTIVATE' in log.action %}deactivate_user{% elif 'REACTIVATE' in log.action %}reactivate_user{% else %}other{% endif %}">
+                                    {{ log.action }}
+                                </span>
+                            </td>
+                            <td>{{ log.description[:50] }}{% if log.description|length > 50 %}...{% endif %}</td>
+                            <td class="text-muted">{{ log.ip_address or 'N/A' }}</td>
+                            <td style="display: none;">{{ log | tojson }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            {% if total_pages > 1 %}
+            <div class="pagination">
+                {% if user_filter %}
+                    {% set query_suffix = '&user=' + user_filter %}
+                {% else %}
+                    {% set query_suffix = '' %}
+                {% endif %}
+                {% if action_filter %}
+                    {% set query_suffix = query_suffix + '&action=' + action_filter %}
+                {% endif %}
+
+                {% if page > 1 %}
+                    <a href="?page=1{{ query_suffix }}">« First</a>
+                    <a href="?page={{ page - 1 }}{{ query_suffix }}">‹ Previous</a>
+                {% else %}
+                    <span class="disabled">« First</span>
+                    <span class="disabled">‹ Previous</span>
+                {% endif %}
+
+                {% for p in range(1, total_pages + 1) %}
+                    {% if p == page %}
+                        <span class="active">{{ p }}</span>
+                    {% else %}
+                        <a href="?page={{ p }}{{ query_suffix }}">{{ p }}</a>
+                    {% endif %}
+                {% endfor %}
+
+                {% if page < total_pages %}
+                    <a href="?page={{ page + 1 }}{{ query_suffix }}">Next ›</a>
+                    <a href="?page={{ total_pages }}{{ query_suffix }}">Last »</a>
+                {% else %}
+                    <span class="disabled">Next ›</span>
+                    <span class="disabled">Last »</span>
+                {% endif %}
+            </div>
+            {% endif %}
+
+            {% else %}
+            <div class="no-logs">
+                <p>No activity logs found</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Log Details Modal -->
+    <div id="logDetailsModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">Activity Log Details</div>
+            <div class="modal-body" id="logDetailsBody">
+                <!-- Will be populated by JavaScript -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="closeLogDetailsModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function formatActionBadgeClass(action) {
+            if ('LOGIN' in action) return 'action-login';
+            if ('LOGOUT' in action) return 'action-logout';
+            if ('CREATE' in action) return 'action-create_user';
+            if ('EDIT' in action) return 'action-edit_lead';
+            if ('SAVE' in action) return 'action-save_lead';
+            if ('VALIDATE' in action) return 'action-validate_lead';
+            if ('CHANGE_ROLE' in action) return 'action-change_role';
+            if ('RESET_PASSWORD' in action) return 'action-reset_password';
+            if ('DEACTIVATE' in action) return 'action-deactivate_user';
+            if ('REACTIVATE' in action) return 'action-reactivate_user';
+            return 'action-other';
+        }
+
+        function viewLogDetails(row) {
+            const cells = row.querySelectorAll('td');
+            const logData = JSON.parse(cells[5].textContent);
+
+            let changesHtml = '';
+            if (logData.changes) {
+                try {
+                    const changes = JSON.parse(logData.changes);
+                    changesHtml = `
+                        <div class="log-detail">
+                            <div class="log-detail-label">Changes:</div>
+                            <div class="log-detail-value" style="font-family: monospace; font-size: 12px;">
+                                ${JSON.stringify(changes, null, 2)}
+                            </div>
+                        </div>
+                    `;
+                } catch (e) {
+                    // Changes couldn't be parsed
+                }
+            }
+
+            const detailsHtml = `
+                <div class="log-detail">
+                    <div class="log-detail-label">Date/Time:</div>
+                    <div class="log-detail-value">${logData.created_at}</div>
+                </div>
+                <div class="log-detail">
+                    <div class="log-detail-label">User:</div>
+                    <div class="log-detail-value">${logData.username}</div>
+                </div>
+                <div class="log-detail">
+                    <div class="log-detail-label">Action:</div>
+                    <div class="log-detail-value">
+                        <span class="action-badge ${formatActionBadgeClass(logData.action)}">
+                            ${logData.action}
+                        </span>
+                    </div>
+                </div>
+                <div class="log-detail">
+                    <div class="log-detail-label">Description:</div>
+                    <div class="log-detail-value">${logData.description || 'N/A'}</div>
+                </div>
+                ${logData.lead_id ? `
+                <div class="log-detail">
+                    <div class="log-detail-label">Lead/File ID:</div>
+                    <div class="log-detail-value">${logData.lead_id}</div>
+                </div>
+                ` : ''}
+                <div class="log-detail">
+                    <div class="log-detail-label">IP Address:</div>
+                    <div class="log-detail-value">${logData.ip_address || 'N/A'}</div>
+                </div>
+                ${changesHtml}
+            `;
+
+            document.getElementById('logDetailsBody').innerHTML = detailsHtml;
+            document.getElementById('logDetailsModal').classList.add('show');
+        }
+
+        function closeLogDetailsModal() {
+            document.getElementById('logDetailsModal').classList.remove('show');
+        }
+
+        function logout() {
+            fetch('/logout', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            }).then(() => {
+                window.location.href = '/';
+            });
+        }
+
+        // Close modal on outside click
+        window.onclick = function(event) {
+            const modal = document.getElementById('logDetailsModal');
+            if (event.target === modal) closeLogDetailsModal();
+        }
+    </script>
+</body>
+</html>
