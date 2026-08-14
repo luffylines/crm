@@ -47,6 +47,18 @@
       .history-card:hover { box-shadow: 0 12px 28px rgba(15, 23, 42, 0.1); transform: translateY(-2px); border-color: rgba(59, 130, 246, 0.28); }
       .hc-name { font-size: 0.86rem; font-weight: 700; color: #0f172a; margin-bottom: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -0.2px; }
       .hc-bar-wrap { height: 8px; background: #e8ecf1; border-radius: 999px; margin-bottom: 10px; overflow: hidden; }
+      .worksheet-modal { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.48); display: none; align-items: center; justify-content: center; z-index: 2000; padding: 20px; }
+      .worksheet-panel { width: min(680px, 100%); background: #fff; border-radius: 18px; box-shadow: 0 30px 80px rgba(15, 23, 42, 0.24); border: 1px solid rgba(148, 163, 184, 0.18); overflow: hidden; }
+      .worksheet-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 20px 14px; border-bottom: 1px solid #e5e7eb; }
+      .worksheet-header h3 { font-size: 1rem; font-weight: 800; color: #0f172a; }
+      .worksheet-close { background: none; border: none; color: #64748b; font-size: 1.2rem; cursor: pointer; }
+      .worksheet-list { display: grid; gap: 10px; padding: 18px 20px 20px; max-height: 70vh; overflow-y: auto; }
+      .worksheet-option { border: 1px solid #e2e8f0; border-radius: 14px; background: #f8fafc; padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; gap: 16px; text-align: left; cursor: pointer; font-family: inherit; transition: all 0.2s ease; }
+      .worksheet-option:hover { border-color: #93c5fd; background: #eff6ff; }
+      .worksheet-option.selected { border-color: #2563eb; background: #eff6ff; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08); }
+      .worksheet-option strong { display: block; font-size: 0.82rem; color: #0f172a; }
+      .worksheet-option small { display: block; font-size: 0.68rem; color: #64748b; margin-top: 3px; }
+      .worksheet-meta { font-size: 0.7rem; color: #475569; font-weight: 600; white-space: nowrap; }
       .hc-bar { height: 8px; background: linear-gradient(90deg, #3b82f6 0%, #10b981 100%); border-radius: 999px; transition: width 0.3s ease; }
       .hc-meta { display: flex; justify-content: space-between; align-items: center; font-size: 0.69rem; color: #64748b; font-weight: 500; }
       .hc-empty { font-size: 0.8rem; color: #64748b; text-align: center; padding: 52px 24px; border: 1px dashed #cbd5e1; border-radius: 16px; background: rgba(241, 245, 250, 0.6); }
@@ -612,6 +624,19 @@
   </div>
 </div>
 
+  <div class="worksheet-modal" id="worksheetModal">
+    <div class="worksheet-panel">
+      <div class="worksheet-header">
+        <h3>Select Worksheet</h3>
+        <button class="worksheet-close" type="button" onclick="closeWorksheetModal()">×</button>
+      </div>
+      <div id="worksheetList" class="worksheet-list"></div>
+      <div style="padding: 0 20px 20px;">
+        <button id="openSelectedWorksheetBtn" class="btn b-save" type="button" style="width:100%;display:none;" onclick="openSelectedWorksheetFromModal()">Open Selected Worksheet</button>
+      </div>
+    </div>
+  </div>
+
   </div>
 
   <div class="upload-screen" id="uploadScreen">
@@ -1145,9 +1170,58 @@
       });
     }
 
-    function openDraft(key){
+    function closeWorksheetModal(){
+      const modal = document.getElementById('worksheetModal');
+      if (modal) modal.style.display = 'none';
+    }
+
+    let selectedWorksheetName = null;
+    let pendingWorksheetKey = null;
+
+    function openWorksheetSelection(key, worksheets){
+      const modal = document.getElementById('worksheetModal');
+      const list = document.getElementById('worksheetList');
+      const openButton = document.getElementById('openSelectedWorksheetBtn');
+      if (!modal || !list || !openButton) return;
+
+      pendingWorksheetKey = key;
+      selectedWorksheetName = null;
+      openButton.style.display = 'block';
+      openButton.disabled = true;
+      list.innerHTML = '';
+      worksheets.forEach(ws => {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'worksheet-option';
+        item.innerHTML = `
+          <div>
+            <strong>${ws.name}</strong>
+            <small>${ws.description || 'Worksheet data'}</small>
+          </div>
+          <div class="worksheet-meta">${ws.rows} rows${ws.validated_count !== undefined && ws.validated_count !== null ? ` · ${ws.validated_count} validated` : ''}</div>
+        `;
+        item.onclick = () => {
+          selectedWorksheetName = ws.name;
+          document.querySelectorAll('.worksheet-option').forEach(el => el.classList.toggle('selected', el === item));
+          openButton.disabled = !selectedWorksheetName;
+        };
+        list.appendChild(item);
+      });
+      modal.style.display = 'flex';
+    }
+
+    function openSelectedWorksheetFromModal(){
+      if (!pendingWorksheetKey || !selectedWorksheetName) {
+        alert('Please select a worksheet first.');
+        return;
+      }
+      closeWorksheetModal();
+      openSelectedWorksheet(pendingWorksheetKey, selectedWorksheetName);
+    }
+
+    function openSelectedWorksheet(key, sheetName){
       showSpinner(true);
-      fetch(`/open/${key}`).then(r=>r.json()).then(data=>{
+      fetch(`/open/${key}?sheet=${encodeURIComponent(sheetName)}`).then(r=>r.json()).then(data=>{
         showSpinner(false);
         if(data.error){ alert(data.error); return; }
         totalRows=data.total; resumeIndex=data.resume_index||0;
@@ -1155,7 +1229,24 @@
         loadSidebar();
         loadRow(resumeIndex);
         loadHomeStats();
-      });
+      }).catch(()=>{ showSpinner(false); alert('Unable to open selected worksheet.'); });
+    }
+
+    function openDraft(key){
+      showSpinner(true);
+      fetch(`/open/${key}`).then(r=>r.json()).then(data=>{
+        showSpinner(false);
+        if(data.error){ alert(data.error); return; }
+        if (data.worksheets && data.worksheets.length) {
+          openWorksheetSelection(key, data.worksheets);
+          return;
+        }
+        totalRows=data.total; resumeIndex=data.resume_index||0;
+        showValidatorScreen();
+        loadSidebar();
+        loadRow(resumeIndex);
+        loadHomeStats();
+      }).catch(()=>{ showSpinner(false); alert('Unable to open workbook.'); });
     }
 
   function goHome(){

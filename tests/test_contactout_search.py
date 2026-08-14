@@ -165,6 +165,41 @@ def test_upload_keeps_multiple_files_with_same_name(monkeypatch, tmp_path):
     assert any(f["filename"] == "repeat.xlsx" for f in files)
 
 
+def test_upload_discovers_arbitrary_sheet_names_without_hardcoded_assumptions(monkeypatch, tmp_path):
+    monkeypatch.setattr(app_module, "DRAFT_DIR", str(tmp_path))
+    os.makedirs(tmp_path, exist_ok=True)
+
+    client = app_module.app.test_client()
+    with client.session_transaction() as sess:
+        sess["username"] = "uploader"
+
+    workbook_path = os.path.join(tmp_path, "dynamic_workbook.xlsx")
+    with pd.ExcelWriter(workbook_path, engine="openpyxl") as writer:
+        pd.DataFrame({"Company": ["Alpha"], "Lead Ranking": ["good"]}).to_excel(writer, sheet_name="Raw Data", index=False)
+        pd.DataFrame({"Company": ["Bravo"], "Lead Ranking": ["best"]}).to_excel(writer, sheet_name="Validation", index=False)
+        pd.DataFrame({"Company": ["Charlie"], "Lead Ranking": ["better"]}).to_excel(writer, sheet_name="Completed Leads", index=False)
+
+    with open(workbook_path, "rb") as fh:
+        response = client.post(
+            "/upload",
+            data={"file": (io.BytesIO(fh.read()), "dynamic_workbook.xlsx")},
+            content_type="multipart/form-data",
+        )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["total"] == 1
+
+    with client.session_transaction() as sess:
+        key = sess.get("file_key")
+
+    open_response = client.get(f"/open/{key}")
+    assert open_response.status_code == 200
+    open_payload = open_response.get_json()
+    sheet_names = [ws["name"] for ws in open_payload["worksheets"]]
+    assert sheet_names == ["Raw Data", "Validation", "Completed Leads"]
+
+
 def test_save_row_debounces_excel_disk_writes(monkeypatch, tmp_path):
     monkeypatch.setattr(app_module, "DRAFT_DIR", str(tmp_path))
     os.makedirs(tmp_path, exist_ok=True)
@@ -201,6 +236,29 @@ def test_save_row_debounces_excel_disk_writes(monkeypatch, tmp_path):
     assert calls["count"] <= 1
 
 
+def test_open_file_lists_worksheets_before_user_picks_one(monkeypatch, tmp_path):
+    monkeypatch.setattr(app_module, "DRAFT_DIR", str(tmp_path))
+    os.makedirs(tmp_path, exist_ok=True)
+
+    client = app_module.app.test_client()
+    with client.session_transaction() as sess:
+        sess["username"] = "uploader"
+
+    master = pd.DataFrame({"Company": ["Alpha"], "Lead Ranking": ["best"]})
+    reval = pd.DataFrame({"Company": ["Bravo"], "Lead Ranking": ["good"]})
+
+    draft_path = os.path.join(tmp_path, "uploader_selection_draft.xlsx")
+    with pd.ExcelWriter(draft_path, engine="openpyxl") as writer:
+        master.to_excel(writer, sheet_name="Masterfile", index=False)
+        reval.to_excel(writer, sheet_name="Christian For Reval", index=False)
+
+    response = client.get("/open/selection")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["worksheets"][0]["name"] == "Masterfile"
+    assert any(ws["name"] == "Christian For Reval" for ws in payload["worksheets"])
+
+
 def test_list_files_uses_cached_summary_without_reopening_every_workbook(monkeypatch, tmp_path):
     monkeypatch.setattr(app_module, "DRAFT_DIR", str(tmp_path))
     os.makedirs(tmp_path, exist_ok=True)
@@ -232,3 +290,83 @@ def test_list_files_uses_cached_summary_without_reopening_every_workbook(monkeyp
     payload = response.get_json()
     assert payload["files"][0]["status"] == "Completed"
     assert calls["count"] == 0
+
+
+def test_open_single_worksheet_skips_selection_modal(monkeypatch, tmp_path):
+    """When workbook has exactly 1 worksheet, skip modal and open directly."""
+    monkeypatch.setattr(app_module, "DRAFT_DIR", str(tmp_path))
+    os.makedirs(tmp_path, exist_ok=True)
+
+    client = app_module.app.test_client()
+    with client.session_transaction() as sess:
+        sess["username"] = "uploader"
+
+    workbook_path = os.path.join(tmp_path, "single_sheet.xlsx")
+    pd.DataFrame({"Company": ["Alpha"], "Lead Ranking": ["good"]}).to_excel(
+        workbook_path, sheet_name="Sheet1", index=False
+    )
+
+    with open(workbook_path, "rb") as fh:
+        response = client.post(
+            "/upload",
+            data={"file": (io.BytesIO(fh.read()), "single_sheet.xlsx")},
+            content_type="multipart/form-data",
+        )
+
+    assert response.status_code == 200
+
+    with client.session_transaction() as sess:
+        key = sess.get("file_key")
+
+    open_response = client.get(f"/open/{key}")
+    assert open_response.status_code == 200
+    payload = open_response.get_json()
+    
+    # Should NOT have worksheets array; should have total, resume_index, sheet_name
+    assert "worksheets" not in payload
+    assert payload["total"] == 1
+    assert payload["sheet_name"] == "Sheet1"
+    assert payload["resumed"] == True
+
+
+def test_open_multiple_worksheets_shows_selection_modal(monkeypatch, tmp_path):
+    """When workbook has 2+ worksheets, show modal with worksheet list."""
+    monkeypatch.setattr(app_module, "DRAFT_DIR", str(tmp_path))
+    os.makedirs(tmp_path, exist_ok=True)
+
+    client = app_module.app.test_client()
+    with client.session_transaction() as sess:
+        sess["username"] = "uploader"
+
+    workbook_path = os.path.join(tmp_path, "multi_sheet.xlsx")
+    with pd.ExcelWriter(workbook_path, engine="openpyxl") as writer:
+        pd.DataFrame({"Company": ["Alpha"], "Lead Ranking": ["good"]}).to_excel(
+            writer, sheet_name="Masterfile", index=False
+        )
+        pd.DataFrame({"Company": ["Bravo"], "Lead Ranking": ["best"]}).to_excel(
+            writer, sheet_name="Christian For Reval", index=False
+        )
+
+    with open(workbook_path, "rb") as fh:
+        response = client.post(
+            "/upload",
+            data={"file": (io.BytesIO(fh.read()), "multi_sheet.xlsx")},
+            content_type="multipart/form-data",
+        )
+
+    assert response.status_code == 200
+
+    with client.session_transaction() as sess:
+        key = sess.get("file_key")
+
+    open_response = client.get(f"/open/{key}")
+    assert open_response.status_code == 200
+    payload = open_response.get_json()
+    
+    # Should have worksheets array with all sheet names
+    assert "worksheets" in payload
+    assert len(payload["worksheets"]) == 2
+    sheet_names = [ws["name"] for ws in payload["worksheets"]]
+    assert "Masterfile" in sheet_names
+    assert "Christian For Reval" in sheet_names
+

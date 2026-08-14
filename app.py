@@ -128,7 +128,86 @@ ACCEPTED_TITLES = [
 geolocator = Nominatim(user_agent="revalidation_tool")
 
 
-def safe_write_excel(df, draft_path):
+def is_row_validated(row):
+    """
+    Determine if a row is already validated.
+    A row is considered validated if it has a Lead Ranking value.
+    """
+    ranking = str(row.get("Lead Ranking", "")).strip().lower()
+    return ranking in ["bad", "good", "better", "best"]
+
+
+def normalize_workbook_sheet(df):
+    if df is None:
+        return df
+    cleaned = df.fillna("")
+    if "be" in cleaned.columns:
+        cleaned.rename(columns={"be": "Lead Ranking"}, inplace=True)
+    cleaned = normalize_company_fields(cleaned)
+    if "Lead Ranking" not in cleaned.columns:
+        cleaned["Lead Ranking"] = ""
+    if "Validated Date" not in cleaned.columns:
+        cleaned["Validated Date"] = ""
+    return cleaned
+
+
+def get_workbook_sheet_map(file_like):
+    try:
+        file_like.seek(0)
+        sheets = pd.read_excel(file_like, sheet_name=None, dtype=str)
+    except Exception:
+        try:
+            file_like.seek(0)
+            single = pd.read_excel(file_like, dtype=str).fillna("")
+            sheets = {"Sheet1": single}
+        except Exception:
+            return {}
+
+    normalized = {}
+    for name, sheet_df in sheets.items():
+        normalized[name] = normalize_workbook_sheet(sheet_df)
+    return normalized
+
+
+def detect_working_sheet_name(sheet_map):
+    if not sheet_map:
+        return None
+
+    for name, df in sheet_map.items():
+        if df is None:
+            continue
+        normalized = normalize_workbook_sheet(df.copy())
+        if "Lead Ranking" not in normalized.columns:
+            continue
+        values = normalized["Lead Ranking"].astype(str).str.strip().str.lower()
+        if values.isin(["bad", "good", "better", "best"]).any():
+            return name
+
+    for name in sheet_map:
+        if name:
+            return name
+    return None
+
+
+def build_worksheet_selection_payload(key, sheet_map):
+    worksheets = []
+    for name, df in sheet_map.items():
+        if df is None:
+            continue
+        validated_count = 0
+        if "Lead Ranking" in df.columns:
+            validated_count = int(df["Lead Ranking"].astype(str).str.strip().str.lower().isin(["bad", "good", "better", "best"]).sum())
+        worksheets.append({
+            "name": name,
+            "rows": len(df),
+            "validated_count": validated_count,
+            "description": "Worksheet data"
+        })
+    return {"key": key, "worksheets": worksheets}
+
+
+def safe_write_excel(df, draft_path, masterfile_df=None, working_sheet_name="Sheet1", workbook_sheets=None):
+    """Write Excel file while preserving all workbook sheets when provided."""
     os.makedirs(os.path.dirname(draft_path) or ".", exist_ok=True)
 
     if os.path.exists(draft_path):
@@ -143,21 +222,33 @@ def safe_write_excel(df, draft_path):
     tmp_path = f"{base}.tmp_{stamp}{ext}"
     fallback_path = f"{base}.autosave_{stamp}{ext}"
 
+    def write_workbook(target_path):
+        if workbook_sheets is not None:
+            with pd.ExcelWriter(target_path, engine="openpyxl") as writer:
+                for sheet_name, sheet_df in workbook_sheets.items():
+                    if sheet_df is None:
+                        continue
+                    sheet_df.to_excel(writer, sheet_name=sheet_name, index=False)
+            return
+
+        with pd.ExcelWriter(target_path, engine="openpyxl") as writer:
+            if masterfile_df is not None:
+                masterfile_df.to_excel(writer, sheet_name="Masterfile", index=False)
+            df.to_excel(writer, sheet_name=working_sheet_name, index=False)
+
     try:
-        df.to_excel(tmp_path, index=False)
+        write_workbook(tmp_path)
         try:
             os.replace(tmp_path, draft_path)
         except PermissionError:
-            # Windows can block a rename/replace if the workbook is open/locked elsewhere.
-            # Keep the save flow alive by writing the latest workbook under a fallback name.
             try:
-                df.to_excel(fallback_path, index=False)
+                write_workbook(fallback_path)
             except Exception:
                 pass
             return False
         except OSError:
             try:
-                df.to_excel(fallback_path, index=False)
+                write_workbook(fallback_path)
             except Exception:
                 pass
             return False
@@ -169,7 +260,7 @@ def safe_write_excel(df, draft_path):
         except Exception:
             pass
         try:
-            df.to_excel(fallback_path, index=False)
+            write_workbook(fallback_path)
         except Exception:
             pass
         return False
@@ -341,9 +432,35 @@ def flush_store_to_disk(store, *, file_key=None, force=False):
         save_store(get_session_key(), store)
         return False
 
+    working_sheet_name = store.get("working_sheet_name") or detect_working_sheet_name(store.get("sheet_map")) or "Sheet1"
+    sheet_map = store.get("sheet_map")
+    if sheet_map:
+        for name, df in list(sheet_map.items()):
+            if df is not None and name == working_sheet_name:
+                sheet_map[name] = store["df"].copy()
+    else:
+        sheet_map = {}
+        sheet_map[working_sheet_name] = store["df"].copy()
+
     draft_df = store["df"].copy()
     draft_df["_validated"] = draft_df.index.map(lambda i: "1" if i in store["validated"] else "")
-    safe_write_excel(draft_df, draft_path)
+    if sheet_map and working_sheet_name in sheet_map:
+        sheet_map[working_sheet_name] = draft_df
+
+    try:
+        safe_write_excel(
+            draft_df,
+            draft_path,
+            masterfile_df=store.get("masterfile_df"),
+            working_sheet_name=working_sheet_name,
+            workbook_sheets=sheet_map,
+        )
+    except TypeError as exc:
+        if "unexpected keyword argument" in str(exc):
+            safe_write_excel(draft_df, draft_path)
+        else:
+            raise
+
     write_draft_summary(draft_path, store["df"], store["validated"])
     session["last_disk_write_ts"] = now
     save_store(get_session_key(), store)
@@ -1033,49 +1150,111 @@ def list_files():
 @login_required
 def open_file(key):
     user = get_username()
-    # SECURITY: Validate key against path traversal attacks
     if not is_safe_key(key):
         return jsonify({"error": "Invalid file key"}), 400
-    
+
     draft_path = get_user_draft_path(key)
     if not draft_path or not os.path.exists(draft_path):
         return jsonify({"error": "Draft not found"}), 404
 
-    # Pickle file uses the same user::key format
+    selected_sheet = request.args.get("sheet")
     safe_key = os.path.basename(str(key))
     pkl = os.path.join(DRAFT_DIR, f"{user}_{safe_key}.pkl")
     store_key = f"{user}::{key}"
+
     if os.path.exists(pkl):
         try:
             with open(pkl, "rb") as f:
                 store = pickle.load(f)
             stores[store_key] = store
             session["file_key"] = key
-            validated = store["validated"]
-            resume_index = max(validated) + 1 if validated else 0
-            if resume_index >= len(store["df"]):
-                resume_index = len(store["df"]) - 1
-            return jsonify({"total": len(store["df"]), "resume_index": resume_index, "resumed": True})
+            sheet_map = store.get("sheet_map") or {}
+            
+            # If no sheet selected, check worksheet count
+            if not selected_sheet:
+                if len(sheet_map) == 1:
+                    # Auto-select the only worksheet
+                    selected_sheet = next(iter(sheet_map))
+                elif len(sheet_map) > 1:
+                    # Show selection modal for multiple worksheets
+                    return jsonify(build_worksheet_selection_payload(key, sheet_map))
+            
+            # Handle the selected sheet
+            if selected_sheet:
+                if selected_sheet not in sheet_map:
+                    return jsonify({"error": "Worksheet not found"}), 404
+                store["df"] = sheet_map[selected_sheet].copy()
+                store["working_sheet_name"] = selected_sheet
+                store["masterfile_df"] = None
+                session["file_key"] = key
+                validated = set()
+                for idx, row in store["df"].iterrows():
+                    if is_row_validated(row):
+                        validated.add(idx)
+                store["validated"] = validated
+                save_store(store_key, store)
+                resume_index = 0
+                if validated:
+                    for i in range(len(store["df"])):
+                        if i not in validated:
+                            resume_index = i
+                            break
+                    else:
+                        resume_index = len(store["df"]) - 1
+                return jsonify({"total": len(store["df"]), "resume_index": resume_index, "resumed": True, "sheet_name": selected_sheet})
         except Exception:
             pass
 
-    # Load from draft xlsx only
     try:
-        df = pd.read_excel(draft_path, dtype=str).fillna("")
+        workbook_sheets = get_workbook_sheet_map(open(draft_path, "rb"))
+        if not workbook_sheets:
+            return jsonify({"error": "Could not read Excel file"}), 500
+
+        # If no sheet selected, check worksheet count
+        if not selected_sheet:
+            if len(workbook_sheets) == 1:
+                # Auto-select the only worksheet
+                selected_sheet = next(iter(workbook_sheets))
+            elif len(workbook_sheets) > 1:
+                # Show selection modal for multiple worksheets
+                return jsonify(build_worksheet_selection_payload(key, workbook_sheets))
+
+        if selected_sheet:
+            if selected_sheet not in workbook_sheets:
+                return jsonify({"error": "Worksheet not found"}), 404
+            df = workbook_sheets[selected_sheet].copy()
+        else:
+            return jsonify({"error": "Could not determine worksheet"}), 400
+
         validated = set()
-        if "_validated" in df.columns:
-            validated = set(df.index[df["_validated"] == "1"].tolist())
-            df = df.drop(columns=["_validated"])
-        df = normalize_company_fields(df)
-        if "Lead Ranking" not in df.columns:
-            df["Lead Ranking"] = ""
-        if "Validated Date" not in df.columns:
-            df["Validated Date"] = ""
-        store = {"df": df, "original_df": df.copy(), "filename": key + ".xlsx", "validated": validated}
+        for idx, row in df.iterrows():
+            if is_row_validated(row):
+                validated.add(idx)
+
+        working_sheet_name = selected_sheet or detect_working_sheet_name(workbook_sheets) or next(iter(workbook_sheets))
+        store = {
+            "df": df,
+            "original_df": df.copy(),
+            "filename": key + ".xlsx",
+            "validated": validated,
+            "masterfile_df": None,
+            "working_sheet_name": working_sheet_name,
+            "sheet_map": workbook_sheets,
+        }
         stores[store_key] = store
         session["file_key"] = key
-        resume_index = max(validated) + 1 if validated else 0
-        return jsonify({"total": len(df), "resume_index": resume_index, "resumed": True})
+        save_store(store_key, store)
+
+        resume_index = 0
+        if validated:
+            for i in range(len(df)):
+                if i not in validated:
+                    resume_index = i
+                    break
+            else:
+                resume_index = len(df) - 1
+
+        return jsonify({"total": len(df), "resume_index": resume_index, "resumed": True, "sheet_name": selected_sheet})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1097,7 +1276,29 @@ def upload():
     prefix = f"{user}_"
     key = draft_base[len(prefix):].replace("_draft.xlsx", "")
 
-    df = pd.read_excel(file, dtype=str).fillna("")
+    sheet_map = {}
+    df = None
+    working_sheet_name = None
+
+    try:
+        all_sheets = pd.read_excel(file, sheet_name=None, dtype=str)
+        for sheet_name, sheet_df in all_sheets.items():
+            sheet_map[sheet_name] = normalize_workbook_sheet(sheet_df.fillna(""))
+        working_sheet_name = detect_working_sheet_name(sheet_map) or next(iter(sheet_map), None)
+        if working_sheet_name is not None:
+            df = sheet_map[working_sheet_name].copy()
+    except Exception:
+        file.seek(0)
+        try:
+            df = normalize_workbook_sheet(pd.read_excel(file, dtype=str).fillna(""))
+        except Exception:
+            return jsonify({"error": "Could not read Excel file"}), 400
+        working_sheet_name = "Sheet1"
+        sheet_map = {working_sheet_name: df.copy()}
+
+    if df is None:
+        return jsonify({"error": "Could not read Excel file"}), 400
+
     if "be" in df.columns:
         df.rename(columns={"be": "Lead Ranking"}, inplace=True)
     df = normalize_company_fields(df)
@@ -1106,25 +1307,37 @@ def upload():
     if "Validated Date" not in df.columns:
         df["Validated Date"] = ""
 
+    # Detect already-validated rows based on Lead Ranking values
     validated = set()
+    for idx, row in df.iterrows():
+        if is_row_validated(row):
+            validated.add(idx)
+    
     resume_index = 0
+    if validated:
+        # Start from the first unvalidated row
+        for i in range(len(df)):
+            if i not in validated:
+                resume_index = i
+                break
+        else:
+            # All rows validated, start from end
+            resume_index = len(df) - 1
 
-    if os.path.exists(draft_path):
-        try:
-            draft_df = pd.read_excel(draft_path, dtype=str).fillna("")
-            if "_validated" in draft_df.columns:
-                validated = set(draft_df.index[draft_df["_validated"] == "1"].tolist())
-                for col in draft_df.columns:
-                    if col != "_validated" and col in df.columns:
-                        df[col] = draft_df[col]
-                resume_index = max(validated) + 1 if validated else 0
-        except Exception:
-            pass
-
-    store = {"df": df, "original_df": df.copy(), "filename": filename, "validated": validated}
+    # Store metadata about the workbook structure
+    store = {
+        "df": df,
+        "original_df": df.copy(),
+        "filename": filename,
+        "validated": validated,
+        "masterfile_df": None,
+        "working_sheet_name": working_sheet_name or "Sheet1",
+        "sheet_map": sheet_map or {working_sheet_name or "Sheet1": df.copy()},
+    }
     session["file_key"] = key
     store_key = get_session_key()
-    safe_write_excel(df, draft_path)
+
+    safe_write_excel(df, draft_path, working_sheet_name=store["working_sheet_name"], workbook_sheets=store["sheet_map"])
     write_draft_summary(draft_path, df, validated)
     save_store(store_key, store)
 
@@ -1229,6 +1442,10 @@ def save_row(idx):
 
     store["validated"].add(idx)
     store["df"] = df
+    if store.get("sheet_map"):
+        selected_name = store.get("working_sheet_name")
+        if selected_name and selected_name in store["sheet_map"]:
+            store["sheet_map"][selected_name] = df.copy()
 
     key = get_session_key()
     file_key = session.get("file_key")
@@ -1285,9 +1502,20 @@ def download():
     if not store:
         return jsonify({"error": "No file loaded"}), 400
     df = store["df"]
+    masterfile_df = store.get("masterfile_df")
+    working_sheet_name = store.get("working_sheet_name") or "Sheet1"
+    workbook_sheets = store.get("sheet_map")
+
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False)
+        if workbook_sheets:
+            for sheet_name, sheet_df in workbook_sheets.items():
+                if sheet_df is not None:
+                    sheet_df.to_excel(writer, sheet_name=sheet_name, index=False)
+        else:
+            if masterfile_df is not None:
+                masterfile_df.to_excel(writer, sheet_name="Masterfile", index=False)
+            df.to_excel(writer, sheet_name=working_sheet_name, index=False)
     output.seek(0)
     filename = store["filename"].replace(".xlsx", "_validated.xlsx")
     return send_file(output, download_name=filename, as_attachment=True,
