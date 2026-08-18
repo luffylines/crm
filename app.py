@@ -1694,6 +1694,7 @@ def save_row(idx):
     df = store["df"]
     original_df = store.get("original_df")
     data = request.json
+    selected_validator = (store.get("selected_validator") or "").strip()
 
     changed, added, removed = [], [], []
     TRACK_COLS = ["Website", "No. of Employees", "Company Industry", "First Name", "Last Name",
@@ -1732,9 +1733,12 @@ def save_row(idx):
         else:
             normalized_payload[key] = value
 
-    for key in ["Company", "Validated Date"]:
+    for key in ["Company", "Validated By", "Validated Date"]:
         if key not in df.columns:
             df[key] = ""
+
+    if selected_validator:
+        normalized_payload["Validated By"] = selected_validator
 
     for key, value in normalized_payload.items():
         if key in df.columns:
@@ -1761,6 +1765,12 @@ def save_row(idx):
     flush_store_to_disk(store, file_key=file_key)
     save_store(key, store)
 
+    navigation_queue = filtered_queue if filtered_queue is not None else list(range(len(df)))
+    next_index = None
+    current_queue_pos = navigation_queue.index(idx)
+    if current_queue_pos + 1 < len(navigation_queue):
+        next_index = navigation_queue[current_queue_pos + 1]
+
     # Log the save activity
     company_name = data.get("Company", "Unknown")
     log_activity(
@@ -1771,7 +1781,8 @@ def save_row(idx):
         changes=changes_dict if changes_dict else None
     )
 
-    return jsonify({"ok": True, "done_count": sum(1 for i in store["validated"] if i < len(df)), "changes_text": changes_text})
+    return jsonify({"ok": True, "done_count": sum(1 for i in store["validated"] if i < len(df)),
+                    "changes_text": changes_text, "next_index": next_index})
 
 
 @app.route("/delete/<int:idx>", methods=["POST"])

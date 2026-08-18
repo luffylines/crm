@@ -1612,6 +1612,7 @@
     }
 
     function openSelectedWorksheet(key, sheetName, validator){
+      selectedValidator = validator || null;
       showSpinner(true);
       const url = `/open/${key}?sheet=${encodeURIComponent(sheetName)}&validator=${encodeURIComponent(validator || '')}`;
       fetch(url).then(r=>r.json()).then(data=>{
@@ -1805,20 +1806,19 @@ function goContacts(){
       currentSaveToken = nextToken;
       showSpinner(true);
       lastSavedSignature = null;
-      fetch(`/row/${idx}`).then(r=>r.json()).then(data=>{
+      return fetch(`/row/${idx}`).then(r=>r.json()).then(data=>{
         if (nextToken !== currentSaveToken) return;
-        showSpinner(false);
         if(data.done){showDone();return;}
         currentRow=data.row; currentIndex=data.index; totalRows=data.total;
         renderRow(data.row,data.validations,data.suggested_rank,data.rank_reason);
         updateProgress(); highlightSidebar(idx);
       }).catch(()=>{
-        if (nextToken === currentSaveToken) showSpinner(false);
-      });
+        if (nextToken === currentSaveToken) alert('Unable to load the next row.');
+      }).finally(()=>showSpinner(false));
     }
 
     function loadSidebar(){
-      fetch('/progress').then(r=>r.json()).then(data=>{
+      return fetch('/progress').then(r=>r.json()).then(data=>{
         if(!data.rows) return;
         const doneCount = Number.isFinite(data.done_count) ? data.done_count : 0;
         const totalCount = Number.isFinite(data.total) ? data.total : 0;
@@ -1881,6 +1881,7 @@ function goContacts(){
       const companyValue = row["Company"] || row["Company Name"] || row["company"] || row["Company name"] || "";
       document.getElementById("companyName").textContent=companyValue || "—";
       document.getElementById("Company").value=companyValue;
+      document.getElementById("validatedBy").value=selectedValidator || row["Validated By"] || currentUser || "";
       const validatedDate = row["Validated Date"] || new Date().toISOString().slice(0,10);
       document.getElementById("ValidatedDate").value = validatedDate;
       const ws=row["Website"]||"";
@@ -2006,25 +2007,22 @@ function goContacts(){
       lastSavedSignature = JSON.stringify({index: currentIndex, payload});
 
       fetch(`/save/${currentIndex}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})
-        .then(r=>r.json()).then(data=>{
-          if (saveToken !== currentSaveToken) return;
-          loadSidebar();
-          const currentQueuePos = filteredQueueIndices.indexOf(currentIndex);
-          if (currentQueuePos >= 0 && currentQueuePos < filteredQueueIndices.length - 1) {
-            const nextIdx = filteredQueueIndices[currentQueuePos + 1];
-            loadRow(nextIdx);
+        .then(async response=>{
+          const data = await response.json();
+          if (!response.ok || data.error) throw new Error(data.error || 'Unable to save row.');
+          await loadSidebar();
+          if (Number.isInteger(data.next_index)) {
+            return loadRow(data.next_index);
           } else {
-            loadRow(currentIndex + 1);
+            showDone();
           }
         }).catch(()=>{
           if (saveToken === currentSaveToken) saveInFlight = false;
         }).finally(()=>{
-          if (saveToken === currentSaveToken) {
-            saveInFlight = false;
-            if (saveBtn) {
-              saveBtn.disabled = false;
-              saveBtn.textContent = 'Save & Next →';
-            }
+          saveInFlight = false;
+          if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.textContent = 'Save & Next →';
           }
         });
     }
