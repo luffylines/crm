@@ -61,6 +61,9 @@
       .worksheet-meta { font-size: 0.7rem; color: #475569; font-weight: 600; white-space: nowrap; }
       .hc-bar { height: 8px; background: linear-gradient(90deg, #3b82f6 0%, #10b981 100%); border-radius: 999px; transition: width 0.3s ease; }
       .hc-meta { display: flex; justify-content: space-between; align-items: center; font-size: 0.69rem; color: #64748b; font-weight: 500; }
+      .file-action-btn { padding: 6px 12px; border: 1px solid #dfe7f1; background: #f8fafc; color: #334155; border-radius: 8px; font-size: 0.65rem; font-weight: 700; cursor: pointer; font-family: inherit; transition: all 0.2s ease; }
+      .file-action-btn:hover { background: #e2e8f0; border-color: #cbd5e1; }
+      .file-action-btn:active { transform: scale(0.98); }
       .hc-empty { font-size: 0.8rem; color: #64748b; text-align: center; padding: 52px 24px; border: 1px dashed #cbd5e1; border-radius: 16px; background: rgba(241, 245, 250, 0.6); }
       .files-screen { display: none; height: calc(100vh - 47px); padding: 32px 36px; overflow-y: auto; background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%); }
       .files-shell { max-width: 1100px; margin: 0 auto; }
@@ -196,6 +199,57 @@
       .row-good   { background: #A8D08D; } .row-good td   { color: #000 !important; }
       .row-better { background: #538135; } .row-better td { color: #fff !important; }
       .row-best   { background: #375623; } .row-best td   { color: #fff !important; }
+
+      /* AI Validation Screen */
+      .ai-validation-screen { display: none; height: calc(100vh - 47px); padding: 32px 36px; overflow-y: auto; background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%); }
+      .ai-validation-shell { max-width: 900px; margin: 0 auto; }
+      .ai-validation-header { margin-bottom: 28px; }
+      .ai-validation-title { font-size: 1.28rem; font-weight: 800; color: #0f172a; letter-spacing: -0.5px; margin-bottom: 4px; }
+      .ai-validation-subtitle { font-size: 0.75rem; color: #6b7280; font-weight: 500; }
+      .ai-validation-card { background: rgba(255,255,255,0.96); border: 1px solid rgba(148, 163, 184, 0.14); border-radius: 18px; padding: 28px; box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06); margin-bottom: 20px; }
+      .ai-validation-section { margin-bottom: 24px; }
+      .ai-validation-section:last-child { margin-bottom: 0; }
+      .ai-validation-label { font-size: 0.75rem; font-weight: 800; color: #475569; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 10px; display: block; }
+      .ai-validation-file-input { display: flex; align-items: center; gap: 12px; }
+      .ai-validation-file-btn { padding: 9px 18px; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); color: #fff; border: none; border-radius: 12px; font-size: 0.78rem; font-weight: 700; cursor: pointer; font-family: inherit; box-shadow: 0 12px 28px rgba(37, 99, 235, 0.22); transition: all 0.2s ease; }
+      .ai-validation-file-btn:hover { filter: brightness(1.04); box-shadow: 0 14px 32px rgba(37, 99, 235, 0.28); }
+      .ai-validation-file-selected { font-size: 0.78rem; color: #64748b; font-weight: 500; }
+      .ai-validation-file-input input { display: none; }
+      .ai-validation-dropdown { display: flex; align-items: center; gap: 12px; }
+      .ai-validation-select { flex: 1; padding: 9px 13px; background: #f8fafc; border: 1px solid #dfe7f1; border-radius: 12px; font-size: 0.78rem; color: #0f172a; font-family: inherit; font-weight: 500; cursor: pointer; outline: none; transition: all 0.2s ease; }
+      .ai-validation-select:focus { border-color: #60a5fa; box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.12); background: #fff; }
+      .ai-validation-actions { display: flex; gap: 12px; }
+      .ai-validation-btn { padding: 9px 20px; background: linear-gradient(135deg, #111827 0%, #1f2937 100%); color: #fff; border: none; border-radius: 12px; font-size: 0.78rem; font-weight: 700; cursor: pointer; font-family: inherit; box-shadow: 0 10px 22px rgba(15,23,42,0.12); transition: all 0.2s ease; }
+      .ai-validation-btn:hover { filter: brightness(1.04); }
+      .ai-validation-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+      .ai-validation-worksheets-list { display: grid; gap: 16px; margin-bottom: 20px; }
+      .ai-validation-worksheet { background: #f8fafc; border: 2px solid #e2e8f0; border-radius: 12px; padding: 16px; cursor: pointer; transition: all 0.2s ease; }
+      .ai-validation-worksheet:hover { border-color: #64748b; background: #eef2f5; }
+      .ai-validation-worksheet.selected { border-color: #2563eb; background: #eff6ff; }
+      .ai-validation-worksheet-name { font-size: 0.9rem; font-weight: 700; color: #0f172a; margin-bottom: 12px; }
+      .ai-validation-worksheet-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; font-size: 0.75rem; }
+      .ai-validation-worksheet-stat { text-align: center; }
+      .ai-validation-worksheet-stat-label { color: #64748b; margin-bottom: 4px; }
+      .ai-validation-worksheet-stat-value { font-weight: 800; color: #0f172a; font-size: 0.95rem; }
+      .ai-validation-summary { display: none; }
+      .ai-validation-summary-item { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #e2e8f0; font-size: 0.78rem; }
+      .ai-validation-summary-item:last-child { border-bottom: none; }
+      .ai-validation-summary-label { color: #64748b; font-weight: 600; }
+      .ai-validation-summary-value { color: #0f172a; font-weight: 700; }
+      .ai-validation-progress { display: none; }
+      .ai-validation-progress-card { background: rgba(255,255,255,0.96); border: 1px solid rgba(148, 163, 184, 0.14); border-radius: 18px; padding: 28px; box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06); }
+      .ai-validation-progress-title { font-size: 0.95rem; font-weight: 800; color: #0f172a; margin-bottom: 18px; }
+      .ai-validation-stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 16px; margin-bottom: 20px; }
+      .ai-validation-stat { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px; text-align: center; }
+      .ai-validation-stat-label { font-size: 0.62rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 6px; }
+      .ai-validation-stat-value { font-size: 1.8rem; font-weight: 800; color: #0f172a; }
+      .ai-validation-pbar-wrap { height: 8px; background: #e2e8f0; border-radius: 4px; margin-bottom: 12px; overflow: hidden; }
+      .ai-validation-pbar { height: 8px; background: linear-gradient(90deg, #3b82f6 0%, #10b981 100%); width: 0%; border-radius: 4px; transition: width 0.3s ease; }
+      .ai-validation-status-text { font-size: 0.72rem; color: #64748b; font-weight: 500; margin-top: 10px; }
+      .ai-validation-done { display: none; text-align: center; }
+      .ai-validation-done-btn { padding: 9px 20px; background: linear-gradient(135deg, #111827 0%, #1f2937 100%); color: #fff; border: none; border-radius: 12px; font-size: 0.78rem; font-weight: 700; cursor: pointer; font-family: inherit; margin-top: 16px; }
+      .ai-validation-done-btn:hover { filter: brightness(1.04); }
+      .ai-validation-error { color: #dc2626; font-size: 0.75rem; padding: 12px; background: rgba(220, 38, 38, 0.08); border-radius: 10px; border: 1px solid rgba(220, 38, 38, 0.2); margin-top: 10px; display: none; }
 
       .done-screen { display: none; flex-direction: column; align-items: center; justify-content: center; height: calc(100vh - 47px); gap: 12px; }
       .done-screen h2 { font-size: 1.28rem; font-weight: 800; color: #0f172a; letter-spacing: -0.4px; }
@@ -415,6 +469,10 @@
     <button class="tab-btn nav-btn" data-nav="contacts" onclick="goContacts()">
       Contacts
     </button>
+
+    <button class="tab-btn nav-btn" data-nav="ai-validate" onclick="goAIValidate()">
+      AI Validate
+    </button>
     
     <a id="adminLink" class="tab-btn nav-btn" href="/admin" style="display:none; text-decoration:none; color:inherit;">
       ⚙ Admin
@@ -604,6 +662,173 @@
   </div>
 </div>
 
+<!-- AI VALIDATION PAGE -->
+<div class="ai-validation-screen" id="aiValidationScreen">
+  <div class="ai-validation-shell">
+    <div class="ai-validation-header">
+      <h2 class="ai-validation-title">AI Excel Validation</h2>
+      <p class="ai-validation-subtitle">Upload an Excel workbook and automatically validate and enrich your CRM leads.</p>
+    </div>
+
+    <!-- Upload Section (Step 1) -->
+    <div class="ai-validation-card" id="aiUploadCard">
+      <div class="ai-validation-section">
+        <label class="ai-validation-label">Excel File</label>
+        <div class="ai-validation-file-input">
+          <button class="ai-validation-file-btn" onclick="document.getElementById('aiFileInput').click()">
+            Choose Excel File
+          </button>
+          <span class="ai-validation-file-selected" id="aiFileSelected">No file selected</span>
+          <input type="file" id="aiFileInput" accept=".xlsx,.xlsm" onchange="onAIFileSelected(this)" style="display:none;"/>
+        </div>
+      </div>
+      <div id="aiValidationError" class="ai-validation-error"></div>
+    </div>
+
+    <!-- Worksheet Selection (Step 2) -->
+    <div class="ai-validation-card" id="aiWorksheetCard" style="display:none;">
+      <div class="ai-validation-section">
+        <label class="ai-validation-label">Select Worksheet to Validate</label>
+        <div class="ai-validation-worksheets-list" id="aiWorksheetsList"></div>
+      </div>
+    </div>
+
+    <!-- Validation Summary (Step 3) -->
+    <div class="ai-validation-card" id="aiSummaryCard" style="display:none;">
+      <div class="ai-validation-section">
+        <label class="ai-validation-label">Selected Worksheet</label>
+        <div style="font-size: 0.9rem; font-weight: 700; color: #0f172a; padding: 12px 0;" id="aiSummarySelectedSheet">-</div>
+      </div>
+
+      <div class="ai-validation-section">
+        <label class="ai-validation-label">Summary</label>
+        <div class="ai-validation-summary">
+          <div class="ai-validation-summary-item">
+            <span class="ai-validation-summary-label">Total Records</span>
+            <span class="ai-validation-summary-value" id="aiSummaryTotal">0</span>
+          </div>
+          <div class="ai-validation-summary-item">
+            <span class="ai-validation-summary-label">Already Validated</span>
+            <span class="ai-validation-summary-value" id="aiSummaryValidated">0</span>
+          </div>
+          <div class="ai-validation-summary-item">
+            <span class="ai-validation-summary-label">Needs Validation</span>
+            <span class="ai-validation-summary-value" id="aiSummaryNeedsValidation">0</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="ai-validation-section">
+        <label class="ai-validation-label">Validators in This Worksheet</label>
+        <div class="ai-validation-summary" id="aiValidatedByBreakdown"></div>
+      </div>
+
+      <div class="ai-validation-section">
+        <label class="ai-validation-label">Select Validator to Process</label>
+        <div class="ai-validation-dropdown">
+          <select class="ai-validation-select" id="validatorSelect" onchange="updateAIValidatorStats()">
+            <option value="">-- Select Validator --</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="ai-validation-section" id="aiValidatorStatsSection" style="display:none;">
+        <label class="ai-validation-label">Validator Assignment for: <span id="aiValidatorStatsName"></span></label>
+        <div class="ai-validation-summary">
+          <div class="ai-validation-summary-item">
+            <span class="ai-validation-summary-label">Assigned to Validator</span>
+            <span class="ai-validation-summary-value" id="aiValidatorAssignedCount">0</span>
+          </div>
+          <div class="ai-validation-summary-item">
+            <span class="ai-validation-summary-label">Already Completed</span>
+            <span class="ai-validation-summary-value" id="aiValidatorCompletedCount">0</span>
+          </div>
+          <div class="ai-validation-summary-item">
+            <span class="ai-validation-summary-label">Remaining to Process</span>
+            <span class="ai-validation-summary-value" id="aiValidatorRemainingCount">0</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="ai-validation-section">
+        <div class="ai-validation-actions">
+          <button class="ai-validation-btn" id="startValidationBtn" onclick="startAIValidation()" disabled>
+            Start AI Validation
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Progress Section -->
+    <div class="ai-validation-progress" id="aiValidationProgress">
+      <div class="ai-validation-progress-card">
+        <div class="ai-validation-progress-title">AI Validation Progress</div>
+        
+        <div class="ai-validation-section">
+          <label class="ai-validation-label">Validator & Scope</label>
+          <div class="ai-validation-summary">
+            <div class="ai-validation-summary-item">
+              <span class="ai-validation-summary-label">Processing Validator</span>
+              <span class="ai-validation-summary-value" id="aiProgressValidatorName">-</span>
+            </div>
+            <div class="ai-validation-summary-item">
+              <span class="ai-validation-summary-label">Rows to Process</span>
+              <span class="ai-validation-summary-value" id="aiProgressEligibleCount">-</span>
+            </div>
+          </div>
+        </div>
+        
+        <div class="ai-validation-stat-grid">
+          <div class="ai-validation-stat">
+            <div class="ai-validation-stat-label">Processed</div>
+            <div class="ai-validation-stat-value" id="aiProcessedCount">0</div>
+          </div>
+          <div class="ai-validation-stat">
+            <div class="ai-validation-stat-label">Verified</div>
+            <div class="ai-validation-stat-value" id="aiVerifiedCount">0</div>
+          </div>
+          <div class="ai-validation-stat">
+            <div class="ai-validation-stat-label">Partial</div>
+            <div class="ai-validation-stat-value" id="aiPartialCount">0</div>
+          </div>
+          <div class="ai-validation-stat">
+            <div class="ai-validation-stat-label">Conflicts</div>
+            <div class="ai-validation-stat-value" id="aiConflictCount">0</div>
+          </div>
+          <div class="ai-validation-stat">
+            <div class="ai-validation-stat-label">Not Found</div>
+            <div class="ai-validation-stat-value" id="aiNotFoundCount">0</div>
+          </div>
+          <div class="ai-validation-stat">
+            <div class="ai-validation-stat-label">Errors</div>
+            <div class="ai-validation-stat-value" id="aiErrorCount">0</div>
+          </div>
+        </div>
+
+        <div class="ai-validation-pbar-wrap">
+          <div class="ai-validation-pbar" id="aiProgressBar" style="width: 0%;"></div>
+        </div>
+
+        <div class="ai-validation-status-text" id="aiStatusText">Preparing validation...</div>
+
+        <div class="ai-validation-done" id="aiValidationDone">
+          <div style="font-size: 2rem; margin-bottom: 12px;">✓</div>
+          <div style="font-size: 1rem; font-weight: 800; color: #0f172a; margin-bottom: 6px;">Validation Complete</div>
+          <p style="font-size: 0.75rem; color: #6b7280;">Your leads have been validated and enriched. The file has been saved to your Files page.</p>
+          <div style="display: flex; gap: 8px; flex-direction: column; margin-top: 12px;">
+            <button class="ai-validation-done-btn" onclick="goToFilesPage()">
+              → Open in Files
+            </button>
+            <button class="ai-validation-done-btn" style="background-color: #e5e7eb; color: #374151;" onclick="downloadAIValidatedFile()">
+              ↓ Download Validated Excel
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- FILES PAGE -->
 <div class="files-screen" id="filesScreen">
   <div class="files-shell">
@@ -633,6 +858,20 @@
       <div id="worksheetList" class="worksheet-list"></div>
       <div style="padding: 0 20px 20px;">
         <button id="openSelectedWorksheetBtn" class="btn b-save" type="button" style="width:100%;display:none;" onclick="openSelectedWorksheetFromModal()">Open Selected Worksheet</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Validator Selection Modal -->
+  <div class="worksheet-modal" id="validatorModal" style="display:none;">
+    <div class="worksheet-panel">
+      <div class="worksheet-header">
+        <h3>Select Validator to Process</h3>
+        <button class="worksheet-close" type="button" onclick="closeValidatorModal()">×</button>
+      </div>
+      <div id="validatorList" class="worksheet-list"></div>
+      <div style="padding: 0 20px 20px;">
+        <button id="continueValidationBtn" class="btn b-save" type="button" style="width:100%;display:none;" onclick="continueWithValidator()">Continue</button>
       </div>
     </div>
   </div>
@@ -824,6 +1063,7 @@
     let currentIndex=0, totalRows=0, currentRow={}, resumeIndex=0, sidebarVisible=true, allPreviewData=[], currentUser='', userRole='';
     let lastContactSearch = null;
     let lastContactProfile = null;
+    let filteredQueueIndices = [];  // Store the filtered row indices from the server
     const PREVIEW_COLS=["Company","Website","Lead Ranking","No. of Employees","Company Industry","First Name","Last Name","Title","Email","Phone","Alt. Contact Info","Alternate Phone","Street","City","State","Zip Code","Timezone","Validated By","Validated Date","Notes"];
 
     function searchContactOut(includeContacts = false) {
@@ -1158,10 +1398,40 @@
           const pct = f.total > 0 ? Math.round((f.done/f.total)*100) : 0;
           const card = document.createElement('div');
           card.className = 'history-card';
-          card.innerHTML = `<div class="hc-name" title="${f.filename}">${f.filename}</div>
+          
+          // Determine if this is an AI-validated file
+          const isAIValidated = f.ai_validated === true;
+          const isCompleted = f.status === 'Completed';
+          
+          // Build action buttons based on file status
+          let actionButtons = '';
+          if (isCompleted) {
+            // Completed file (AI validated)
+            actionButtons = `
+              <button class="file-action-btn" title="Open/Edit" onclick="openDraft('${f.key}')">Open/Edit</button>
+              <button class="file-action-btn" title="AI Validate Again" onclick="aiValidateAgain('${f.key}')">AI Validate Again</button>
+              <button class="file-action-btn" title="Download" onclick="downloadFile('${f.key}')">Download</button>
+            `;
+          } else {
+            // In Progress file
+            actionButtons = `
+              <button class="file-action-btn" title="Continue" onclick="openDraft('${f.key}')">Continue</button>
+              <button class="file-action-btn" title="Open/Edit" onclick="openDraft('${f.key}')">Open/Edit</button>
+              <button class="file-action-btn" title="Download" onclick="downloadFile('${f.key}')">Download</button>
+            `;
+          }
+          
+          card.innerHTML = `
+            <div class="hc-name" title="${f.filename}">${f.filename}</div>
             <div class="hc-bar-wrap"><div class="hc-bar" style="width:${pct}%"></div></div>
-            <div class="hc-meta"><span>${f.done} / ${f.total} validated</span><span>${f.modified}</span></div>`;
-          card.onclick = () => openDraft(f.key);
+            <div class="hc-meta">
+              <span>${f.done} / ${f.total} validated</span>
+              <span>${f.modified}</span>
+            </div>
+            <div style="display: flex; gap: 4px; margin-top: 8px; flex-wrap: wrap;">
+              ${actionButtons}
+            </div>
+          `;
           grid.appendChild(card);
         });
       }).catch(()=>{
@@ -1177,6 +1447,8 @@
 
     let selectedWorksheetName = null;
     let pendingWorksheetKey = null;
+    let selectedWorksheetValidators = [];
+    let selectedValidator = null;
 
     function openWorksheetSelection(key, worksheets){
       const modal = document.getElementById('worksheetModal');
@@ -1186,6 +1458,7 @@
 
       pendingWorksheetKey = key;
       selectedWorksheetName = null;
+      selectedWorksheetValidators = [];
       openButton.style.display = 'block';
       openButton.disabled = true;
       list.innerHTML = '';
@@ -1202,6 +1475,7 @@
         `;
         item.onclick = () => {
           selectedWorksheetName = ws.name;
+          selectedWorksheetValidators = ws.validators || [];
           document.querySelectorAll('.worksheet-option').forEach(el => el.classList.toggle('selected', el === item));
           openButton.disabled = !selectedWorksheetName;
         };
@@ -1216,19 +1490,76 @@
         return;
       }
       closeWorksheetModal();
-      openSelectedWorksheet(pendingWorksheetKey, selectedWorksheetName);
+      
+      // Show validator selection if validators exist
+      if (selectedWorksheetValidators && selectedWorksheetValidators.length > 0) {
+        showValidatorSelection(pendingWorksheetKey, selectedWorksheetName, selectedWorksheetValidators);
+      } else {
+        // No validators - open with empty validator
+        openSelectedWorksheet(pendingWorksheetKey, selectedWorksheetName, '');
+      }
     }
 
-    function openSelectedWorksheet(key, sheetName){
+    function showValidatorSelection(key, sheetName, validators) {
+      const modal = document.getElementById('validatorModal');
+      const list = document.getElementById('validatorList');
+      const continueBtn = document.getElementById('continueValidationBtn');
+      if (!modal || !list) return;
+
+      pendingWorksheetKey = key;
+      selectedWorksheetName = sheetName;
+      selectedValidator = null;
+      continueBtn.style.display = 'block';
+      continueBtn.disabled = true;
+      list.innerHTML = '';
+      
+      validators.forEach(v => {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'worksheet-option';
+        item.innerHTML = `<div><strong>${v}</strong><small>Process ${v}'s assigned rows</small></div>`;
+        item.onclick = () => {
+          selectedValidator = v;
+          document.querySelectorAll('#validatorList .worksheet-option').forEach(el => el.classList.toggle('selected', el === item));
+          continueBtn.disabled = !selectedValidator;
+        };
+        list.appendChild(item);
+      });
+      modal.style.display = 'flex';
+    }
+
+    function closeValidatorModal(){
+      const modal = document.getElementById('validatorModal');
+      if (modal) modal.style.display = 'none';
+    }
+
+    function continueWithValidator(){
+      if (!pendingWorksheetKey || !selectedWorksheetName || !selectedValidator) {
+        alert('Please select a validator.');
+        return;
+      }
+      closeValidatorModal();
+      openSelectedWorksheet(pendingWorksheetKey, selectedWorksheetName, selectedValidator);
+    }
+
+    function openSelectedWorksheet(key, sheetName, validator){
       showSpinner(true);
-      fetch(`/open/${key}?sheet=${encodeURIComponent(sheetName)}`).then(r=>r.json()).then(data=>{
+      const url = `/open/${key}?sheet=${encodeURIComponent(sheetName)}&validator=${encodeURIComponent(validator || '')}`;
+      fetch(url).then(r=>r.json()).then(data=>{
         showSpinner(false);
         if(data.error){ alert(data.error); return; }
-        totalRows=data.total; resumeIndex=data.resume_index||0;
+        totalRows=data.filtered_total||data.total; resumeIndex=data.resume_index||0;
         showValidatorScreen();
         loadSidebar();
         loadRow(resumeIndex);
         loadHomeStats();
+        // Update progress bar label to show validator info
+        if (data.validator) {
+          const progressLabel = document.getElementById('progressLabel');
+          if (progressLabel) {
+            progressLabel.textContent = `Validating ${data.validator}'s rows (${data.filtered_total || data.total})`;
+          }
+        }
       }).catch(()=>{ showSpinner(false); alert('Unable to open selected worksheet.'); });
     }
 
@@ -1251,7 +1582,7 @@
 
   function goHome(){
 
-  const ids = ['homeScreen','filesScreen','contactsScreen','uploadScreen','validatorScreen','previewScreen','doneScreen','tabBtns','sidebarToggle'];
+  const ids = ['homeScreen','filesScreen','contactsScreen','uploadScreen','validatorScreen','previewScreen','doneScreen','tabBtns','sidebarToggle','aiValidationScreen'];
   ids.forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
@@ -1274,7 +1605,7 @@
 
 function goFiles(){
 
-  const ids = ['homeScreen','filesScreen','contactsScreen','uploadScreen','validatorScreen','previewScreen','doneScreen','tabBtns','sidebarToggle'];
+  const ids = ['homeScreen','filesScreen','contactsScreen','uploadScreen','validatorScreen','previewScreen','doneScreen','tabBtns','sidebarToggle','aiValidationScreen'];
   ids.forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
@@ -1294,7 +1625,7 @@ function goFiles(){
 }
 function goContacts(){
 
-  const ids = ['homeScreen','filesScreen','contactsScreen','validatorScreen','previewScreen','doneScreen','tabBtns','sidebarToggle'];
+  const ids = ['homeScreen','filesScreen','contactsScreen','validatorScreen','previewScreen','doneScreen','tabBtns','sidebarToggle','aiValidationScreen'];
   ids.forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
@@ -1408,6 +1739,7 @@ function goContacts(){
       fetch('/progress').then(r=>r.json()).then(data=>{
         if(!data.rows) return;
         totalRows = data.total;
+        filteredQueueIndices = data.rows.map(r => r.index);  // Store the filtered queue indices
         const list=document.getElementById('sidebarList'); list.innerHTML='';
         data.rows.forEach(r=>{
           const d=document.createElement('div');
@@ -1573,7 +1905,15 @@ function goContacts(){
       fetch(`/save/${currentIndex}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})
         .then(r=>r.json()).then(data=>{
           loadSidebar();
-          loadRow(currentIndex+1);
+          // Find the next row in the filtered queue
+          const currentQueuePos = filteredQueueIndices.indexOf(currentIndex);
+          if (currentQueuePos >= 0 && currentQueuePos < filteredQueueIndices.length - 1) {
+            const nextIdx = filteredQueueIndices[currentQueuePos + 1];
+            loadRow(nextIdx);
+          } else {
+            // No more rows in filtered queue
+            loadRow(currentIndex + 1);
+          }
         });
     }
 
@@ -1715,8 +2055,504 @@ function goContacts(){
       loadHistory();
     }
 
-    function downloadFile(){window.location.href="/download";}
+    function downloadFile(fileKey){
+      if(fileKey){
+        // Download a specific file from Files page
+        window.location.href=`/download/${fileKey}`;
+      }else{
+        // Download current store (validator screen)
+        window.location.href="/download";
+      }
+    }
     function showSpinner(show){document.getElementById("spinner").className=show?"spinner on":"spinner";}
+
+    // ====== AI VALIDATION FUNCTIONS ======
+    let aiJobId = null;
+    let aiFileLoaded = false;
+    let aiSelectedValidator = null;  // Track selected validator for progress display
+
+    function goAIValidate() {
+      const ids = ['homeScreen','filesScreen','contactsScreen','uploadScreen','validatorScreen','previewScreen','doneScreen','tabBtns','sidebarToggle','aiValidationScreen'];
+      ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (id === 'aiValidationScreen') el.style.display = 'flex';
+        else if (id === 'tabBtns' || id === 'sidebarToggle') el.style.display = 'none';
+        else el.style.display = 'none';
+      });
+
+      setNavState('ai-validate');
+      loadValidators();
+    }
+
+    async function loadValidators() {
+      try {
+        const response = await fetch('/api/ai-validation/validators');
+        const data = await response.json();
+        
+        const select = document.getElementById('validatorSelect');
+        select.innerHTML = '<option value="">-- Select Validator --</option>';
+        
+        if (data.validators && data.validators.length > 0) {
+          data.validators.forEach(v => {
+            const option = document.createElement('option');
+            option.value = v;
+            option.textContent = v;
+            select.appendChild(option);
+          });
+        }
+        
+        // Add option to enter custom validator
+        const customOption = document.createElement('option');
+        customOption.value = '__custom__';
+        customOption.textContent = '-- Custom Validator --';
+        select.appendChild(customOption);
+        
+      } catch (error) {
+        console.error('Error loading validators:', error);
+        document.getElementById('validatorSelect').innerHTML = '<option value="">Error loading validators</option>';
+      }
+    }
+
+    async function onAIFileSelected(input) {
+      if (!input.files || !input.files[0]) {
+        return;
+      }
+
+      const file = input.files[0];
+      document.getElementById('aiFileSelected').textContent = `Selected: ${file.name}`;
+      
+      // Show loading state
+      document.getElementById('aiWorksheetCard').style.display = 'none';
+      document.getElementById('aiSummaryCard').style.display = 'none';
+      
+      // Inspect worksheets
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        console.log('[AI VALIDATION] Inspecting worksheets...');
+        const response = await fetch('/api/ai-validation/inspect-worksheets', {
+          method: 'POST',
+          body: formData
+        });
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        
+        const data = await response.json();
+        console.log('[AI VALIDATION] Worksheets inspected:', data);
+        
+        if (data.error) {
+          throw new Error(data.error);
+        }
+        
+        // Store worksheets info
+        window.aiWorksheets = data.worksheets || [];
+        window.aiWorkingSheet = data.working_sheet;
+        
+        // Show worksheet selection if multiple exist
+        if (window.aiWorksheets.length > 1) {
+          showAIWorksheetSelection();
+        } else if (window.aiWorksheets.length === 1) {
+          // Automatically select the only worksheet
+          selectAIWorksheet(window.aiWorksheets[0].name);
+        }
+        
+      } catch (error) {
+        console.error('Error inspecting worksheets:', error);
+        const errorDiv = document.getElementById('aiValidationError');
+        errorDiv.textContent = `Error: ${error.message}`;
+        errorDiv.style.display = 'block';
+      }
+    }
+
+    function showAIWorksheetSelection() {
+      const worksheetList = document.getElementById('aiWorksheetsList');
+      worksheetList.innerHTML = '';
+      
+      for (const worksheet of window.aiWorksheets) {
+        const div = document.createElement('div');
+        div.className = 'ai-validation-worksheet';
+        div.onclick = () => selectAIWorksheet(worksheet.name);
+        
+        div.innerHTML = `
+          <div class="ai-validation-worksheet-name">${worksheet.name}</div>
+          <div class="ai-validation-worksheet-stats">
+            <div class="ai-validation-worksheet-stat">
+              <div class="ai-validation-worksheet-stat-label">Total</div>
+              <div class="ai-validation-worksheet-stat-value">${worksheet.total}</div>
+            </div>
+            <div class="ai-validation-worksheet-stat">
+              <div class="ai-validation-worksheet-stat-label">Validated</div>
+              <div class="ai-validation-worksheet-stat-value">${worksheet.already_validated}</div>
+            </div>
+            <div class="ai-validation-worksheet-stat">
+              <div class="ai-validation-worksheet-stat-label">Needs</div>
+              <div class="ai-validation-worksheet-stat-value">${worksheet.needs_validation}</div>
+            </div>
+          </div>
+        `;
+        
+        worksheetList.appendChild(div);
+      }
+      
+      document.getElementById('aiWorksheetCard').style.display = 'block';
+      document.getElementById('aiSummaryCard').style.display = 'none';
+    }
+
+    function selectAIWorksheet(worksheetName) {
+      // Mark as selected
+      const worksheets = document.querySelectorAll('.ai-validation-worksheet');
+      worksheets.forEach(ws => {
+        ws.classList.remove('selected');
+        if (ws.textContent.includes(worksheetName)) {
+          ws.classList.add('selected');
+        }
+      });
+      
+      // Store selected worksheet
+      window.aiSelectedWorksheet = worksheetName;
+      
+      // Show summary
+      showAIValidationSummary(worksheetName);
+    }
+
+    function showAIValidationSummary(worksheetName) {
+      const worksheet = window.aiWorksheets.find(ws => ws.name === worksheetName);
+      if (!worksheet) return;
+      
+      // Update summary display
+      document.getElementById('aiSummarySelectedSheet').textContent = worksheet.name;
+      document.getElementById('aiSummaryTotal').textContent = worksheet.total;
+      document.getElementById('aiSummaryValidated').textContent = worksheet.already_validated;
+      document.getElementById('aiSummaryNeedsValidation').textContent = worksheet.needs_validation;
+      
+      // Show breakdown by validator
+      const breakdown = document.getElementById('aiValidatedByBreakdown');
+      breakdown.innerHTML = '';
+      
+      if (Object.keys(worksheet.validated_by_counts).length > 0) {
+        for (const [validator, count] of Object.entries(worksheet.validated_by_counts)) {
+          const item = document.createElement('div');
+          item.className = 'ai-validation-summary-item';
+          item.innerHTML = `
+            <span class="ai-validation-summary-label">${validator}</span>
+            <span class="ai-validation-summary-value">${count}</span>
+          `;
+          breakdown.appendChild(item);
+        }
+      } else {
+        const item = document.createElement('div');
+        item.className = 'ai-validation-summary-item';
+        item.innerHTML = `
+          <span class="ai-validation-summary-label">No validators yet</span>
+          <span class="ai-validation-summary-value">-</span>
+        `;
+        breakdown.appendChild(item);
+      }
+      
+      // Load validators from the worksheet's validated_by_counts
+      populateAIValidatorsFromWorksheet(worksheet);
+      
+      // Show summary card
+      document.getElementById('aiWorksheetCard').style.display = 'none';
+      document.getElementById('aiSummaryCard').style.display = 'block';
+    }
+
+    function populateAIValidatorsFromWorksheet(worksheet) {
+      const select = document.getElementById('validatorSelect');
+      select.innerHTML = '<option value="">-- Select Validator --</option>';
+      
+      // Get unique validators from validated_by_counts
+      const validators = Object.keys(worksheet.validated_by_counts || {});
+      
+      if (validators.length === 0) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'No validators found in worksheet';
+        option.disabled = true;
+        select.appendChild(option);
+      } else {
+        for (const validator of validators) {
+          const option = document.createElement('option');
+          option.value = validator;
+          option.textContent = validator;
+          select.appendChild(option);
+        }
+      }
+      
+      // Add custom validator option
+      const customOption = document.createElement('option');
+      customOption.value = '__custom__';
+      customOption.textContent = '-- Custom Validator --';
+      select.appendChild(customOption);
+      
+      // Store worksheet for stats calculation
+      window.aiSelectedWorksheetData = worksheet;
+    }
+
+    function updateAIValidatorStats() {
+      const validatorSelect = document.getElementById('validatorSelect');
+      const selectedValidator = validatorSelect.value;
+      const worksheet = window.aiSelectedWorksheetData;
+      
+      if (!selectedValidator || !worksheet) {
+        document.getElementById('aiValidatorStatsSection').style.display = 'none';
+        document.getElementById('startValidationBtn').disabled = true;
+        return;
+      }
+      
+      if (selectedValidator === '__custom__') {
+        // Custom validator - stats not available from worksheet
+        document.getElementById('aiValidatorStatsSection').style.display = 'none';
+        document.getElementById('startValidationBtn').disabled = false;
+        return;
+      }
+      
+      // Calculate stats for selected validator
+      const validatedByCount = worksheet.validated_by_counts[selectedValidator] || 0;
+      
+      // Note: We don't know the breakdown of completed vs incomplete without analyzing the data
+      // But we can show the total assigned to this validator
+      // The backend will calculate the final eligible count
+      
+      document.getElementById('aiValidatorStatsName').textContent = selectedValidator;
+      document.getElementById('aiValidatorAssignedCount').textContent = validatedByCount;
+      
+      // Show the stats section
+      document.getElementById('aiValidatorStatsSection').style.display = 'block';
+      
+      // Enable start button
+      document.getElementById('startValidationBtn').disabled = false;
+    }
+
+    async function loadAIValidators() {
+      // This function is no longer used - validators are loaded from worksheet data
+    }
+
+    async function startAIValidation() {
+      const fileInput = document.getElementById('aiFileInput');
+      const validatorSelect = document.getElementById('validatorSelect');
+      
+      if (!fileInput.files || !fileInput.files[0]) {
+        alert('Please select an Excel file');
+        return;
+      }
+
+      if (!window.aiSelectedWorksheet) {
+        alert('Please select a worksheet');
+        return;
+      }
+
+      let validator = validatorSelect.value;
+      if (validator === '__custom__') {
+        validator = prompt('Enter custom validator name:');
+        if (!validator || !validator.trim()) {
+          alert('Validator name is required');
+          return;
+        }
+      }
+
+      const formData = new FormData();
+      formData.append('file', fileInput.files[0]);
+      formData.append('validator', validator);
+      formData.append('worksheet', window.aiSelectedWorksheet);
+
+      try {
+        document.getElementById('startValidationBtn').disabled = true;
+        document.getElementById('aiValidationError').style.display = 'none';
+        
+        console.log('[AI VALIDATION] Starting validation...', {
+          file: fileInput.files[0].name,
+          validator: validator,
+          worksheet: window.aiSelectedWorksheet
+        });
+        
+        const response = await fetch('/api/ai-validation/start', {
+          method: 'POST',
+          body: formData
+        });
+
+        const data = await response.json();
+        
+        console.log('[AI VALIDATION] Start response:', data);
+        
+        if (!response.ok || !data.job_id) {
+          throw new Error(data.error || 'Failed to start validation');
+        }
+
+        aiJobId = data.job_id;
+        aiSelectedValidator = validator;  // Store validator for progress display
+        showAIValidationProgress();
+        pollAIValidationProgress();
+
+      } catch (error) {
+        console.error('Error starting validation:', error);
+        const errorDiv = document.getElementById('aiValidationError');
+        errorDiv.textContent = `Error: ${error.message}`;
+        errorDiv.style.display = 'block';
+        document.getElementById('startValidationBtn').disabled = false;
+      }
+    }
+
+    function showAIValidationProgress() {
+      document.getElementById('aiUploadCard').style.display = 'none';
+      document.getElementById('aiWorksheetCard').style.display = 'none';
+      document.getElementById('aiSummaryCard').style.display = 'none';
+      document.getElementById('aiValidationProgress').style.display = 'block';
+      resetAIProgressUI();
+    }
+
+    function resetAIProgressUI() {
+      document.getElementById('aiProgressValidatorName').textContent = '-';
+      document.getElementById('aiProgressEligibleCount').textContent = '-';
+      document.getElementById('aiProcessedCount').textContent = '0';
+      document.getElementById('aiVerifiedCount').textContent = '0';
+      document.getElementById('aiPartialCount').textContent = '0';
+      document.getElementById('aiConflictCount').textContent = '0';
+      document.getElementById('aiNotFoundCount').textContent = '0';
+      document.getElementById('aiErrorCount').textContent = '0';
+      document.getElementById('aiProgressBar').style.width = '0%';
+      document.getElementById('aiStatusText').textContent = 'Preparing validation...';
+      document.getElementById('aiValidationDone').style.display = 'none';
+    }
+
+    async function pollAIValidationProgress() {
+      if (!aiJobId) return;
+
+      try {
+        const response = await fetch(`/api/ai-validation/progress/${aiJobId}`);
+        const data = await response.json();
+
+        if (data.status === 'completed') {
+          completeAIValidation(data);
+          return;
+        }
+
+        if (data.status === 'error') {
+          document.getElementById('aiValidationError').textContent = data.error || 'Validation failed';
+          document.getElementById('aiValidationError').style.display = 'block';
+          return;
+        }
+
+        // Update progress UI
+        updateAIProgressUI(data);
+
+        // Poll again in 2 seconds
+        setTimeout(pollAIValidationProgress, 2000);
+
+      } catch (error) {
+        console.error('Error polling progress:', error);
+        setTimeout(pollAIValidationProgress, 5000);
+      }
+    }
+
+    function updateAIProgressUI(data) {
+      const total = data.total || 1;
+      const eligible = data.eligible_count || total;
+      const processed = data.processed || 0;
+      const pct = Math.round((processed / eligible) * 100);
+
+      // Update validator info
+      if (aiSelectedValidator) {
+        document.getElementById('aiProgressValidatorName').textContent = aiSelectedValidator;
+      }
+      document.getElementById('aiProgressEligibleCount').textContent = eligible;
+
+      document.getElementById('aiProcessedCount').textContent = processed;
+      document.getElementById('aiVerifiedCount').textContent = data.verified || 0;
+      document.getElementById('aiPartialCount').textContent = data.partial || 0;
+      document.getElementById('aiConflictCount').textContent = data.conflict || 0;
+      document.getElementById('aiNotFoundCount').textContent = data.not_found || 0;
+      document.getElementById('aiErrorCount').textContent = data.errors || 0;
+      document.getElementById('aiProgressBar').style.width = pct + '%';
+      
+      const status = data.current_status || 'Processing...';
+      document.getElementById('aiStatusText').textContent = `${status} (${processed}/${eligible})`;
+    }
+
+    function completeAIValidation(data) {
+      updateAIProgressUI(data);
+      document.getElementById('aiProgressBar').style.width = '100%';
+      document.getElementById('aiStatusText').textContent = 'Validation complete!';
+      document.getElementById('aiValidationDone').style.display = 'block';
+      // Store file_key if available (file is registered in Files system)
+      if (data.file_key) {
+        aiCompletedFileKey = data.file_key;
+      }
+    }
+
+    let aiCompletedFileKey = null;
+
+    function goToFilesPage() {
+      // Navigate to Files page
+      const ids = ['homeScreen', 'filesScreen', 'contactsScreen', 'uploadScreen', 'validatorScreen', 'previewScreen', 'doneScreen', 'tabBtns', 'sidebarToggle', 'aiValidationScreen'];
+      ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = 'none';
+      });
+      document.getElementById('filesScreen').style.display = 'flex';
+      // Reload the files list
+      loadHistory();
+    }
+
+    function downloadAIValidatedFile() {
+      if (!aiJobId) return;
+      window.location.href = `/api/ai-validation/download/${aiJobId}`;
+    }
+
+    async function aiValidateAgain(fileKey) {
+      // Re-validate an existing file from the Files system
+      const validator = prompt('Enter validator name for re-validation:');
+      if (!validator || !validator.trim()) {
+        return;
+      }
+      
+      try {
+        showSpinner(true);
+        const response = await fetch(`/api/ai-validation/revalidate/${fileKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ validator: validator.trim() })
+        });
+        
+        const data = await response.json();
+        showSpinner(false);
+        
+        if (!response.ok || !data.job_id) {
+          alert('Error: ' + (data.error || 'Failed to start re-validation'));
+          return;
+        }
+        
+        // Navigate to AI validation screen and show progress
+        aiJobId = data.job_id;
+        const ids = ['homeScreen','filesScreen','contactsScreen','uploadScreen','validatorScreen','previewScreen','doneScreen','tabBtns','sidebarToggle'];
+        ids.forEach(id => {
+          const el = document.getElementById(id);
+          if (!el) return;
+          el.style.display = 'none';
+        });
+        document.getElementById('aiValidationScreen').style.display = 'flex';
+        setNavState('ai-validate');
+        
+        // Show progress UI
+        document.getElementById('aiUploadCard').style.display = 'none';
+        document.getElementById('aiWorksheetCard').style.display = 'none';
+        document.getElementById('aiSummaryCard').style.display = 'none';
+        document.getElementById('aiValidationProgress').style.display = 'block';
+        resetAIProgressUI();
+        
+        // Start polling
+        pollAIValidationProgress();
+        
+      } catch (error) {
+        showSpinner(false);
+        console.error('Error starting re-validation:', error);
+        alert('Error: ' + error.message);
+      }
+    }
   </script>
   </body>
   </html>

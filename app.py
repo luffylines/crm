@@ -7,7 +7,8 @@ import os
 import json
 import pickle
 import stat
-from datetime import datetime, timedelta
+import threading
+from datetime import datetime, timedelta, timezone
 from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut
 import time
@@ -52,6 +53,8 @@ CONTACTOUT_API_KEY = _clean_api_key(os.getenv("CONTACTOUT_API_KEY"))
 CONTACTOUT_BASE_URL = "https://api.contactout.com"
 APOLLO_API_KEY = _clean_api_key(os.getenv("APOLLO_API_KEY"))
 APOLLO_BASE_URL = "https://api.apollo.io"
+PDL_API_KEY = _clean_api_key(os.getenv("PDL_API_KEY"))
+PDL_BASE_URL = "https://api.peopledatalabs.com/v5"
 
 app = Flask(__name__)
 
@@ -189,18 +192,68 @@ def detect_working_sheet_name(sheet_map):
     return None
 
 
+def build_filtered_queue(df, selected_validator):
+    """
+    Build a filtered queue of row indices based on the selected validator.
+    
+    Rules:
+    1. Row's "Validated By" must equal selected_validator (if validator is selected)
+    2. Row's "Lead Ranking" must be empty (not already validated)
+    
+    Returns:
+    - validated: set of indices of rows that are already validated (have a Lead Ranking)
+    - filtered_queue: list of indices of rows that match the filter criteria
+    """
+    validated = set()
+    filtered_queue = []
+    
+    # Ensure required columns exist
+    if "Validated By" not in df.columns:
+        df["Validated By"] = ""
+    if "Lead Ranking" not in df.columns:
+        df["Lead Ranking"] = ""
+    
+    for idx in range(len(df)):
+        row = df.iloc[idx]
+        lead_ranking = str(row.get("Lead Ranking", "")).strip()
+        
+        # Check if row is already validated (has a Lead Ranking)
+        if lead_ranking and lead_ranking.lower() in ["bad", "good", "better", "best"]:
+            validated.add(idx)
+            continue
+        
+        # If a validator is selected, only include rows for that validator
+        if selected_validator:
+            validated_by = str(row.get("Validated By", "")).strip()
+            if validated_by == selected_validator:
+                filtered_queue.append(idx)
+        else:
+            # No validator selected - include all unvalidated rows
+            filtered_queue.append(idx)
+    
+    return validated, filtered_queue
+
+
 def build_worksheet_selection_payload(key, sheet_map):
     worksheets = []
     for name, df in sheet_map.items():
         if df is None:
             continue
         validated_count = 0
+        validators = set()
         if "Lead Ranking" in df.columns:
             validated_count = int(df["Lead Ranking"].astype(str).str.strip().str.lower().isin(["bad", "good", "better", "best"]).sum())
+        if "Validated By" in df.columns:
+            for val in df["Validated By"]:
+                val_str = str(val).strip() if val else ""
+                if val_str:
+                    validators.add(val_str)
         worksheets.append({
             "name": name,
             "rows": len(df),
             "validated_count": validated_count,
+            "validators": sorted(list(validators)),
+            "validated_by_counts": {v: int((df["Validated By"].astype(str) == v).sum()) for v in validators},
             "description": "Worksheet data"
         })
     return {"key": key, "worksheets": worksheets}
@@ -1010,7 +1063,7 @@ def login():
         session.permanent = True
 
         # Update last login
-        user.last_login = datetime.utcnow()
+        user.last_login = datetime.now(timezone.utc)
         db.session.commit()
 
         # Log the login activity
@@ -1108,6 +1161,7 @@ def list_files():
             total = int(summary.get("total", 0))
             done = int(summary.get("done", 0))
             status = summary.get("status", "In Progress")
+            ai_validated = summary.get("ai_validated", False)
 
             files.append({
                 "key": base,
@@ -1116,7 +1170,8 @@ def list_files():
                 "done": done,
                 "status": status,
                 "modified": modified_str,
-                "modified_ts": modified
+                "modified_ts": modified,
+                "ai_validated": ai_validated
             })
 
         except Exception as e:
@@ -1158,6 +1213,7 @@ def open_file(key):
         return jsonify({"error": "Draft not found"}), 404
 
     selected_sheet = request.args.get("sheet")
+    selected_validator = request.args.get("validator", "").strip()
     safe_key = os.path.basename(str(key))
     pkl = os.path.join(DRAFT_DIR, f"{user}_{safe_key}.pkl")
     store_key = f"{user}::{key}"
@@ -1186,22 +1242,18 @@ def open_file(key):
                 store["df"] = sheet_map[selected_sheet].copy()
                 store["working_sheet_name"] = selected_sheet
                 store["masterfile_df"] = None
+                store["selected_validator"] = selected_validator or None
                 session["file_key"] = key
-                validated = set()
-                for idx, row in store["df"].iterrows():
-                    if is_row_validated(row):
-                        validated.add(idx)
+                
+                # Build filtered queue based on validator
+                validated, filtered_queue = build_filtered_queue(store["df"], selected_validator)
                 store["validated"] = validated
+                store["filtered_queue"] = filtered_queue
+                store["selected_validator"] = selected_validator or None
                 save_store(store_key, store)
-                resume_index = 0
-                if validated:
-                    for i in range(len(store["df"])):
-                        if i not in validated:
-                            resume_index = i
-                            break
-                    else:
-                        resume_index = len(store["df"]) - 1
-                return jsonify({"total": len(store["df"]), "resume_index": resume_index, "resumed": True, "sheet_name": selected_sheet})
+                
+                resume_index = filtered_queue[0] if filtered_queue else 0
+                return jsonify({"total": len(store["df"]), "filtered_total": len(filtered_queue), "resume_index": resume_index, "resumed": True, "sheet_name": selected_sheet, "validator": selected_validator})
         except Exception:
             pass
 
@@ -1226,10 +1278,7 @@ def open_file(key):
         else:
             return jsonify({"error": "Could not determine worksheet"}), 400
 
-        validated = set()
-        for idx, row in df.iterrows():
-            if is_row_validated(row):
-                validated.add(idx)
+        validated, filtered_queue = build_filtered_queue(df, selected_validator)
 
         working_sheet_name = selected_sheet or detect_working_sheet_name(workbook_sheets) or next(iter(workbook_sheets))
         store = {
@@ -1240,21 +1289,15 @@ def open_file(key):
             "masterfile_df": None,
             "working_sheet_name": working_sheet_name,
             "sheet_map": workbook_sheets,
+            "selected_validator": selected_validator or None,
+            "filtered_queue": filtered_queue,
         }
         stores[store_key] = store
         session["file_key"] = key
         save_store(store_key, store)
 
-        resume_index = 0
-        if validated:
-            for i in range(len(df)):
-                if i not in validated:
-                    resume_index = i
-                    break
-            else:
-                resume_index = len(df) - 1
-
-        return jsonify({"total": len(df), "resume_index": resume_index, "resumed": True, "sheet_name": selected_sheet})
+        resume_index = filtered_queue[0] if filtered_queue else 0
+        return jsonify({"total": len(df), "filtered_total": len(filtered_queue), "resume_index": resume_index, "resumed": True, "sheet_name": selected_sheet, "validator": selected_validator})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1350,12 +1393,22 @@ def get_row(idx):
     store = get_store()
     if not store:
         return jsonify({"error": "No file loaded"}), 400
+    
+    # Check if row is in filtered queue (if validator filtering is active)
+    filtered_queue = store.get("filtered_queue")
+    if filtered_queue is not None and idx not in filtered_queue:
+        return jsonify({"error": "This row is not in your validation queue"}), 403
+    
     df = store["df"]
     if idx >= len(df):
         return jsonify({"done": True})
     row = df.iloc[idx].to_dict()
     validations, suggested_rank, rank_reason = run_validations(row)
-    return jsonify({"row": row, "index": idx, "total": len(df), "validations": validations,
+    
+    filtered_queue = store.get("filtered_queue", list(range(len(df))))
+    total_filtered = len(filtered_queue)
+    
+    return jsonify({"row": row, "index": idx, "total": total_filtered, "validations": validations,
                     "suggested_rank": suggested_rank, "rank_reason": rank_reason,
                     "is_validated": idx in store["validated"]})
 
@@ -1368,17 +1421,29 @@ def get_progress():
         return jsonify({"error": "No file loaded"}), 400
     df = store["df"]
     validated = store["validated"]
+    filtered_queue = store.get("filtered_queue", list(range(len(df))))
+    selected_validator = store.get("selected_validator")
+    
     rows, rows_full = [], []
-    for i, row in df.iterrows():
-        done = i in validated
-        rows.append({"index": i, "company": row.get("Company", ""), "rank": row.get("Lead Ranking", ""),
+    
+    # Only iterate through filtered queue indices
+    for queue_idx, data_idx in enumerate(filtered_queue):
+        if data_idx >= len(df):
+            continue
+        row = df.iloc[data_idx]
+        done = data_idx in validated
+        rows.append({"index": data_idx, "company": row.get("Company", ""), "rank": row.get("Lead Ranking", ""),
                      "validated_by": row.get("Validated By", ""), "done": done})
         full = row.to_dict()
-        full["_index"] = i
+        full["_index"] = data_idx
         full["_done"] = done
         rows_full.append(full)
-    return jsonify({"rows": rows, "rows_full": rows_full, "total": len(df),
-                    "done_count": sum(1 for i in validated if i < len(df))})
+    
+    done_count = sum(1 for idx in filtered_queue if idx in validated)
+    total_filtered = len(filtered_queue)
+    
+    return jsonify({"rows": rows, "rows_full": rows_full, "total": total_filtered,
+                    "done_count": done_count, "validator": selected_validator})
 
 
 @app.route("/save/<int:idx>", methods=["POST"])
@@ -1387,6 +1452,12 @@ def save_row(idx):
     store = get_store()
     if not store:
         return jsonify({"error": "No file loaded"}), 400
+    
+    # Check if row is in filtered queue (if validator filtering is active)
+    filtered_queue = store.get("filtered_queue")
+    if filtered_queue is not None and idx not in filtered_queue:
+        return jsonify({"error": "This row is not in your validation queue"}), 403
+    
     df = store["df"]
     original_df = store.get("original_df")
     data = request.json
@@ -1520,6 +1591,35 @@ def download():
     filename = store["filename"].replace(".xlsx", "_validated.xlsx")
     return send_file(output, download_name=filename, as_attachment=True,
                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+@app.route("/download/<key>")
+@login_required
+def download_file_by_key(key):
+    """Download a specific file from the Files system."""
+    user = get_username()
+    if not is_safe_key(key):
+        return jsonify({"error": "Invalid file key"}), 400
+    
+    draft_path = get_user_draft_path(key)
+    if not draft_path or not os.path.exists(draft_path):
+        return jsonify({"error": "File not found"}), 404
+    
+    # Verify the file belongs to the current user
+    expected_prefix = f"{user}_"
+    filename = os.path.basename(draft_path)
+    if not filename.startswith(expected_prefix):
+        return jsonify({"error": "Unauthorized"}), 403
+    
+    # Generate a friendly download name
+    display_name = key.replace("_draft", "").replace("_", " ") + ".xlsx"
+    
+    return send_file(
+        draft_path,
+        download_name=display_name,
+        as_attachment=True,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
 
 # ============================================================================
@@ -1720,7 +1820,7 @@ def api_update_user(user_id):
                     description=f"Reset password for user {user.username}"
                 )
         
-        user.updated_at = datetime.utcnow()
+        user.updated_at = datetime.now(timezone.utc)
         db.session.commit()
         
         return jsonify({"ok": True, "user": user.to_dict()})
@@ -1745,7 +1845,7 @@ def api_deactivate_user(user_id):
             return jsonify({"error": "Cannot deactivate yourself"}), 400
         
         user.is_active = False
-        user.updated_at = datetime.utcnow()
+        user.updated_at = datetime.now(timezone.utc)
         db.session.commit()
         
         # Log the activity
@@ -1772,7 +1872,7 @@ def api_reactivate_user(user_id):
             return jsonify({"error": "User not found"}), 404
         
         user.is_active = True
-        user.updated_at = datetime.utcnow()
+        user.updated_at = datetime.now(timezone.utc)
         db.session.commit()
         
         # Log the activity
@@ -1788,6 +1888,818 @@ def api_reactivate_user(user_id):
         db.session.rollback()
         print(f"Error reactivating user: {e}")
         return jsonify({"error": "Error reactivating user"}), 500
+
+
+# ============================================================================
+# AI VALIDATION ROUTES
+# ============================================================================
+
+# Store for AI validation job progress: {job_id: {status, progress_data}}
+ai_validation_jobs = {}
+
+
+def pdl_enrich_person(first_name, last_name, company="", title=""):
+    """Enrich person data using People Data Labs API."""
+    if not PDL_API_KEY:
+        return {"found": False, "message": "PDL API key not configured"}
+    
+    try:
+        headers = {
+            "X-Api-Key": PDL_API_KEY,
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "query": {
+                "bool": {
+                    "must": []
+                }
+            }
+        }
+        
+        # Build query with first and last name
+        if first_name:
+            payload["query"]["bool"]["must"].append({
+                "match": {
+                    "first_name": {
+                        "query": first_name,
+                        "fuzziness": "AUTO"
+                    }
+                }
+            })
+        
+        if last_name:
+            payload["query"]["bool"]["must"].append({
+                "match": {
+                    "last_name": {
+                        "query": last_name,
+                        "fuzziness": "AUTO"
+                    }
+                }
+            })
+        
+        if company:
+            payload["query"]["bool"]["must"].append({
+                "match": {
+                    "work_company_name": {
+                        "query": company,
+                        "fuzziness": "AUTO"
+                    }
+                }
+            })
+        
+        if title:
+            payload["query"]["bool"]["must"].append({
+                "match": {
+                    "job_title": {
+                        "query": title,
+                        "fuzziness": "AUTO"
+                    }
+                }
+            })
+        
+        response = req.post(
+            f"{PDL_BASE_URL}/person/search",
+            headers=headers,
+            json=payload,
+            timeout=15
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("data") and len(data["data"]) > 0:
+                person = data["data"][0]
+                return {
+                    "found": True,
+                    "person": person,
+                    "message": "Found on PDL"
+                }
+        
+        return {
+            "found": False,
+            "message": f"PDL query returned status {response.status_code}"
+        }
+    
+    except Exception as e:
+        return {
+            "found": False,
+            "message": f"PDL error: {str(e)}"
+        }
+
+
+def pdl_enrich_company(company_name, website=""):
+    """Enrich company data using People Data Labs API."""
+    if not PDL_API_KEY:
+        return {"found": False, "message": "PDL API key not configured"}
+    
+    try:
+        headers = {
+            "X-Api-Key": PDL_API_KEY,
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "query": {
+                "bool": {
+                    "must": []
+                }
+            }
+        }
+        
+        if company_name:
+            payload["query"]["bool"]["must"].append({
+                "match": {
+                    "name": {
+                        "query": company_name,
+                        "fuzziness": "AUTO"
+                    }
+                }
+            })
+        
+        if website:
+            domain = website.strip()
+            domain = re.sub(r"^https?://", "", domain, flags=re.I)
+            domain = re.sub(r"^www\.", "", domain, flags=re.I)
+            domain = domain.split("/")[0]
+            if domain:
+                payload["query"]["bool"]["must"].append({
+                    "term": {
+                        "website": domain
+                    }
+                })
+        
+        response = req.post(
+            f"{PDL_BASE_URL}/company/search",
+            headers=headers,
+            json=payload,
+            timeout=15
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("data") and len(data["data"]) > 0:
+                company = data["data"][0]
+                return {
+                    "found": True,
+                    "company": company,
+                    "message": "Found on PDL"
+                }
+        
+        return {
+            "found": False,
+            "message": f"PDL query returned status {response.status_code}"
+        }
+    
+    except Exception as e:
+        return {
+            "found": False,
+            "message": f"PDL error: {str(e)}"
+        }
+
+@app.route("/api/ai-validation/validators")
+@login_required
+def get_validators():
+    """Get list of validators from existing Excel files."""
+    try:
+        validators = set()
+        user = get_username()
+        prefix = f"{user}_"
+        
+        # Scan all user's draft files for "Validated By" column values
+        for fname in os.listdir(DRAFT_DIR):
+            if not fname.endswith("_draft.xlsx") or not fname.startswith(prefix):
+                continue
+            
+            draft_path = os.path.join(DRAFT_DIR, fname)
+            try:
+                df = pd.read_excel(draft_path, dtype=str).fillna("")
+                if "Validated By" in df.columns:
+                    for val in df["Validated By"]:
+                        if val and str(val).strip():
+                            validators.add(str(val).strip())
+            except Exception:
+                pass
+        
+        return jsonify({"validators": sorted(list(validators))})
+    except Exception as e:
+        print(f"Error loading validators: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/ai-validation/inspect-worksheets", methods=["POST"])
+@login_required
+def inspect_worksheets():
+    """Inspect uploaded workbook and return worksheet information."""
+    print("[AI VALIDATION] ========== INSPECT WORKSHEETS CALLED ==========")
+    try:
+        file = request.files.get("file")
+        
+        print(f"[AI VALIDATION] File: {file.filename if file else 'NONE'}")
+        
+        if not file:
+            print("[AI VALIDATION] ERROR: No file uploaded")
+            return jsonify({"error": "No file uploaded"}), 400
+        
+        # Read the workbook
+        try:
+            print(f"[AI VALIDATION] Reading workbook from file...")
+            workbook_sheets = get_workbook_sheet_map(file)
+            print(f"[AI VALIDATION] Workbook sheets: {list(workbook_sheets.keys()) if workbook_sheets else 'NONE'}")
+            if not workbook_sheets:
+                print("[AI VALIDATION] ERROR: Could not read Excel file (no sheets)")
+                return jsonify({"error": "Could not read Excel file"}), 400
+        except Exception as e:
+            print(f"[AI VALIDATION] ERROR reading workbook: {e}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({"error": f"Could not read Excel file: {str(e)}"}), 400
+        
+        # Detect working sheet
+        working_sheet_name = detect_working_sheet_name(workbook_sheets) or next(iter(workbook_sheets), None)
+        print(f"[AI VALIDATION] Working sheet detected: {working_sheet_name}")
+        
+        # Analyze each worksheet
+        worksheets_info = []
+        for sheet_name, df in workbook_sheets.items():
+            if df is None or len(df) == 0:
+                continue
+            
+            total_rows = int(len(df))  # Convert to int
+            
+            # Count already validated rows
+            validated_by_column = None
+            for col in df.columns:
+                if col.lower() in ['validated by', 'validatedby']:
+                    validated_by_column = col
+                    break
+            
+            already_validated = 0
+            if validated_by_column:
+                already_validated = int(df[validated_by_column].notna().sum() - (df[validated_by_column] == '').sum() - (df[validated_by_column].isnull()).sum())
+            else:
+                already_validated = 0
+            
+            needs_validation = int(total_rows - already_validated)  # Convert to int
+            
+            worksheets_info.append({
+                'name': sheet_name,
+                'total': total_rows,
+                'already_validated': already_validated,
+                'needs_validation': needs_validation,
+                'is_working': sheet_name == working_sheet_name,
+                'validated_by_counts': {}
+            })
+            
+            # Count validators
+            if validated_by_column:
+                validator_counts = df[validated_by_column].value_counts().to_dict()
+                worksheets_info[-1]['validated_by_counts'] = {
+                    str(k): int(v) for k, v in validator_counts.items() if k and str(k).strip() and k != 'nan'
+                }
+            
+            print(f"[AI VALIDATION] Sheet '{sheet_name}': {total_rows} total, {already_validated} validated, {needs_validation} need validation")
+        
+        print(f"[AI VALIDATION] Returning info for {len(worksheets_info)} worksheets")
+        return jsonify({
+            "worksheets": worksheets_info,
+            "working_sheet": working_sheet_name
+        })
+    
+    except Exception as e:
+        print(f"[AI VALIDATION] EXCEPTION in inspect_worksheets: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/ai-validation/start", methods=["POST"])
+@login_required
+def start_ai_validation():
+    """Start an AI validation job."""
+    print("[AI VALIDATION] ========== START ROUTE CALLED ==========")
+    try:
+        file = request.files.get("file")
+        validator = request.form.get("validator", "").strip()
+        selected_worksheet = request.form.get("worksheet", "").strip()
+        
+        print(f"[AI VALIDATION] File: {file.filename if file else 'NONE'}")
+        print(f"[AI VALIDATION] Validator: {validator}")
+        print(f"[AI VALIDATION] Selected Worksheet: {selected_worksheet}")
+        
+        if not file:
+            print("[AI VALIDATION] ERROR: No file uploaded")
+            return jsonify({"error": "No file uploaded"}), 400
+        if not validator:
+            print("[AI VALIDATION] ERROR: No validator specified")
+            return jsonify({"error": "Validator required"}), 400
+        
+        # Generate job ID
+        job_id = f"{get_username()}_{int(time.time())}_{os.urandom(4).hex()}"
+        print(f"[AI VALIDATION] Generated job_id: {job_id}")
+        
+        # Read the workbook
+        try:
+            print(f"[AI VALIDATION] Reading workbook from file...")
+            workbook_sheets = get_workbook_sheet_map(file)
+            print(f"[AI VALIDATION] Workbook sheets: {list(workbook_sheets.keys()) if workbook_sheets else 'NONE'}")
+            if not workbook_sheets:
+                print("[AI VALIDATION] ERROR: Could not read Excel file (no sheets)")
+                return jsonify({"error": "Could not read Excel file"}), 400
+        except Exception as e:
+            print(f"[AI VALIDATION] ERROR reading workbook: {e}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({"error": f"Could not read Excel file: {str(e)}"}), 400
+        
+        # Use selected worksheet or detect working sheet
+        if selected_worksheet and selected_worksheet in workbook_sheets:
+            working_sheet_name = selected_worksheet
+            print(f"[AI VALIDATION] Using selected worksheet: {working_sheet_name}")
+        else:
+            working_sheet_name = detect_working_sheet_name(workbook_sheets) or next(iter(workbook_sheets), "Sheet1")
+            print(f"[AI VALIDATION] Detected working sheet: {working_sheet_name}")
+        
+        df = workbook_sheets.get(working_sheet_name)
+        
+        if df is None or len(df) == 0:
+            print(f"[AI VALIDATION] ERROR: No data in working sheet (df={df}, len={len(df) if df is not None else 'None'})")
+            return jsonify({"error": "No data in workbook"}), 400
+        
+        print(f"[AI VALIDATION] Dataframe loaded: {len(df)} rows, {len(df.columns)} columns")
+        
+        # Initialize job
+        ai_validation_jobs[job_id] = {
+            "status": "processing",
+            "user": get_username(),
+            "validator": validator,
+            "original_filename": file.filename,  # Store original filename for output naming
+            "df": df.copy(),
+            "workbook_sheets": workbook_sheets,
+            "working_sheet_name": working_sheet_name,
+            "total": len(df),
+            "eligible_rows": [],  # Will be calculated in process_ai_validation_async
+            "eligible_count": 0,  # Count of rows to process
+            "processed": 0,
+            "verified": 0,
+            "partial": 0,
+            "conflict": 0,
+            "not_found": 0,
+            "errors": 0,
+            "current_status": "Initializing...",
+            "created_at": datetime.now(),
+            "download_path": None,
+            "file_key": None  # Will be set after save
+        }
+        
+        print(f"[AI VALIDATION] Job initialized: {job_id}")
+        print(f"[AI VALIDATION] Starting background processing...")
+        
+        # Start background processing asynchronously so the browser can receive the
+        # job_id and begin polling immediately instead of waiting for the full workbook
+        # validation to finish in the same request.
+        thread = threading.Thread(target=process_ai_validation_async, args=(job_id,), daemon=True)
+        thread.start()
+        print(f"[AI VALIDATION] Background thread started for job: {job_id}")
+        
+        print(f"[AI VALIDATION] Returning success response with job_id: {job_id}")
+        return jsonify({"ok": True, "job_id": job_id})
+    
+    except Exception as e:
+        print(f"[AI VALIDATION] EXCEPTION in start_ai_validation: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+def process_ai_validation_async(job_id):
+    """Process AI validation in background."""
+    print(f"[AI VALIDATION] process_ai_validation_async STARTED for job: {job_id}")
+    try:
+        job = ai_validation_jobs.get(job_id)
+        if not job:
+            print(f"[AI VALIDATION] ERROR: Job {job_id} not found in ai_validation_jobs")
+            return
+        
+        print(f"[AI VALIDATION] Job found: status={job['status']}, total={job['total']}")
+        
+        df = job["df"].copy()
+        validator = job["validator"]
+        print(f"[AI VALIDATION] DataFrame copied, {len(df)} rows, validator={validator}")
+        
+        # Ensure required columns exist
+        if "Validated By" not in df.columns:
+            df["Validated By"] = ""
+        if "Validated Date" not in df.columns:
+            df["Validated Date"] = ""
+        if "Validation Status" not in df.columns:
+            df["Validation Status"] = ""
+        if "Lead Ranking" not in df.columns:
+            df["Lead Ranking"] = ""
+        if "Notes" not in df.columns:
+            df["Notes"] = ""
+        
+        print(f"[AI VALIDATION] Required columns initialized")
+        
+        # FILTER: Identify eligible rows for processing
+        # Eligible rows are those where:
+        # 1. Validated By equals the selected validator (must be assigned to them)
+        # 2. AND Lead Ranking is blank (not Bad/Good/Better/Best)
+        eligible_rows = []
+        completed_count = 0
+        assigned_to_others = 0
+        not_assigned = 0
+        
+        for idx in range(len(df)):
+            row = df.iloc[idx]
+            validated_by = str(row.get("Validated By", "")).strip()
+            lead_ranking = str(row.get("Lead Ranking", "")).strip()
+            
+            # Check if row is already completed
+            if lead_ranking and lead_ranking.lower() in ["bad", "good", "better", "best"]:
+                completed_count += 1
+                continue
+            
+            # Check if row is not assigned to this validator
+            if validated_by != validator:
+                # It's either assigned to someone else or not assigned at all
+                if validated_by:
+                    assigned_to_others += 1
+                else:
+                    not_assigned += 1
+                continue
+            
+            # This row is eligible for processing (assigned to this validator with blank Lead Ranking)
+            eligible_rows.append(idx)
+        
+        job["eligible_rows"] = eligible_rows
+        job["eligible_count"] = len(eligible_rows)
+        
+        print(f"[AI VALIDATION] Filtering complete:")
+        print(f"  Total rows: {len(df)}")
+        print(f"  Eligible for {validator}: {len(eligible_rows)}")
+        print(f"  Already completed: {completed_count}")
+        print(f"  Assigned to other validators: {assigned_to_others}")
+        print(f"  Not assigned yet: {not_assigned}")
+        
+        # Process only eligible rows
+        print(f"[AI VALIDATION] Starting row processing: {len(eligible_rows)} eligible rows")
+        for row_num, idx in enumerate(eligible_rows):
+            row = df.iloc[idx]
+            
+            try:
+                company_name = str(row.get("Company", "")).strip()
+                first_name = str(row.get("First Name", "")).strip()
+                last_name = str(row.get("Last Name", "")).strip()
+                title = str(row.get("Title", "")).strip()
+                website = str(row.get("Website", "")).strip()
+                
+                job["current_status"] = f"Validating: {company_name or f'{first_name} {last_name}'} ({job['processed'] + 1}/{len(eligible_rows)})"
+                
+                # Run existing validation functions
+                validations, suggested_rank, rank_reason = run_validations(row)
+                
+                # Try PDL enrichment if we have company name
+                pdl_company_data = None
+                pdl_person_data = None
+                
+                if company_name:
+                    pdl_company_result = pdl_enrich_company(company_name, website)
+                    if pdl_company_result.get("found"):
+                        pdl_company_data = pdl_company_result.get("company", {})
+                        
+                        # Enrich company fields from PDL
+                        if not str(row.get("Website", "")).strip() and pdl_company_data.get("website"):
+                            df.at[idx, "Website"] = pdl_company_data["website"]
+                        
+                        if not str(row.get("No. of Employees", "")).strip() and pdl_company_data.get("employee_count"):
+                            df.at[idx, "No. of Employees"] = str(pdl_company_data["employee_count"])
+                        
+                        if not str(row.get("Company Industry", "")).strip() and pdl_company_data.get("industry"):
+                            df.at[idx, "Company Industry"] = pdl_company_data["industry"]
+                
+                if first_name and last_name:
+                    pdl_person_result = pdl_enrich_person(first_name, last_name, company_name, title)
+                    if pdl_person_result.get("found"):
+                        pdl_person_data = pdl_person_result.get("person", {})
+                        
+                        # Enrich person fields from PDL
+                        if not str(row.get("Title", "")).strip() and pdl_person_data.get("job_title"):
+                            df.at[idx, "Title"] = pdl_person_data["job_title"]
+                        
+                        if not str(row.get("Email", "")).strip() and pdl_person_data.get("emails"):
+                            emails = pdl_person_data.get("emails", [])
+                            if emails and len(emails) > 0:
+                                df.at[idx, "Email"] = emails[0]
+                        
+                        if not str(row.get("Phone", "")).strip() and pdl_person_data.get("phone_numbers"):
+                            phones = pdl_person_data.get("phone_numbers", [])
+                            if phones and len(phones) > 0:
+                                df.at[idx, "Phone"] = phones[0]
+                
+                # Re-run validations after enrichment
+                updated_row = df.iloc[idx].to_dict()
+                validations, suggested_rank, rank_reason = run_validations(updated_row)
+                
+                # Determine validation status based on validations
+                all_valid = all(v.get("valid", False) for v in validations.values())
+                some_valid = any(v.get("valid", False) for v in validations.values())
+                
+                if all_valid:
+                    validation_status = "Verified"
+                    job["verified"] += 1
+                elif some_valid:
+                    validation_status = "Partial"
+                    job["partial"] += 1
+                else:
+                    validation_status = "Not Found"
+                    job["not_found"] += 1
+                
+                # Build notes explaining what was verified/found
+                notes_parts = []
+                
+                # Add what was verified
+                verified_fields = [field for field, result in validations.items() if result.get("valid", False)]
+                if verified_fields:
+                    notes_parts.append(f"Verified: {', '.join(verified_fields)}")
+                
+                # Add what failed
+                failed_fields = [field for field, result in validations.items() if not result.get("valid", False)]
+                if failed_fields:
+                    notes_parts.append(f"Not verified: {', '.join(failed_fields)}")
+                
+                # Add enrichment notes
+                if pdl_company_data or pdl_person_data:
+                    notes_parts.append("Enriched from PDL")
+                
+                # Update row with validation results
+                df.at[idx, "Validation Status"] = validation_status
+                # Validated By is already set to the validator (it's a filter requirement)
+                # Only update other fields: Validated Date, Lead Ranking, Notes
+                df.at[idx, "Validated Date"] = datetime.now().strftime("%b %d, %Y")
+                df.at[idx, "Lead Ranking"] = suggested_rank
+                if notes_parts:
+                    df.at[idx, "Notes"] = " | ".join(notes_parts)
+                
+                job["processed"] += 1
+                
+            except Exception as e:
+                job["errors"] += 1
+                job["processed"] += 1
+                df.at[idx, "Validation Status"] = "Error"
+                existing_notes = str(df.at[idx, "Notes"]).strip()
+                error_msg = f"Validation error: {str(e)}"
+                if existing_notes:
+                    df.at[idx, "Notes"] = f"{existing_notes} | {error_msg}"
+                else:
+                    df.at[idx, "Notes"] = error_msg
+                print(f"Error processing row {idx}: {e}")
+                continue
+            
+            # Small delay to be respectful to APIs
+            time.sleep(0.1)
+        
+        # Save the validated workbook and register it in the Files system
+        try:
+            # Generate a unique file_key for the output based on original filename
+            original_filename = job.get("original_filename", "ai_validated")
+            base_name = os.path.splitext(original_filename)[0]
+            # Clean the base name: remove .xlsx if present, limit length
+            base_name = base_name.replace(" ", "_").replace(".", "_")[:50]
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            ai_output_key = f"ai_validated_{base_name}_{timestamp}"
+            
+            # Use the deterministic path generation
+            draft_path = get_user_draft_path(ai_output_key)
+            if not draft_path:
+                draft_path = os.path.join(DRAFT_DIR, f"{job['user']}_{ai_output_key}_draft.xlsx")
+            
+            # Update the working sheet in the workbook
+            workbook_sheets = job["workbook_sheets"]
+            if job["working_sheet_name"] in workbook_sheets:
+                workbook_sheets[job["working_sheet_name"]] = df.copy()
+            
+            safe_write_excel(
+                df,
+                draft_path,
+                working_sheet_name=job["working_sheet_name"],
+                workbook_sheets=workbook_sheets
+            )
+            
+            # Create draft summary with AI validation metadata
+            # Count rows with Lead Ranking filled (validated)
+            validated_count = 0
+            for idx, row in df.iterrows():
+                lead_ranking = str(row.get("Lead Ranking", "")).strip()
+                if lead_ranking and lead_ranking.lower() in ["bad", "good", "better", "best"]:
+                    validated_count += 1
+            
+            # Create extended summary with AI validation info
+            ai_summary = {
+                "total": len(df),
+                "done": validated_count,
+                "status": "Completed",  # AI validation creates completed files
+                "modified_ts": time.time(),
+                "ai_validated": True,
+                "validator": job["validator"],
+                "eligible_count": job.get("eligible_count", len(df)),
+                "processed": job["processed"],
+                "verified": job.get("verified", 0),
+                "partial": job.get("partial", 0),
+                "not_found": job.get("not_found", 0),
+                "errors": job.get("errors", 0),
+            }
+            summary_path = get_draft_summary_path(draft_path)
+            try:
+                with open(summary_path, "w", encoding="utf-8") as f:
+                    json.dump(ai_summary, f)
+            except Exception as e:
+                print(f"[AI VALIDATION] Warning: Could not write draft summary: {e}")
+            
+            # Store the file_key and path in the job for retrieval
+            job["download_path"] = draft_path
+            job["file_key"] = ai_output_key
+            job["df"] = df  # Update the dataframe in job
+            
+            print(f"[AI VALIDATION] Workbook saved to: {draft_path}")
+            print(f"[AI VALIDATION] File key: {ai_output_key}")
+            print(f"[AI VALIDATION] File registered in Files system")
+            
+        except Exception as e:
+            print(f"[AI VALIDATION] ERROR saving validated workbook: {e}")
+            import traceback
+            traceback.print_exc()
+            job["errors"] += 1
+        
+        job["status"] = "completed"
+        job["current_status"] = "Validation complete"
+        print(f"[AI VALIDATION] JOB COMPLETED: {job_id}")
+        print(f"[AI VALIDATION] Final stats - Processed: {job['processed']}, Verified: {job['verified']}, Partial: {job['partial']}, Not Found: {job['not_found']}, Errors: {job['errors']}")
+        
+    except Exception as e:
+        print(f"[AI VALIDATION] EXCEPTION in process_ai_validation_async: {e}")
+        import traceback
+        traceback.print_exc()
+        job = ai_validation_jobs.get(job_id)
+        if job:
+            job["status"] = "error"
+            job["current_status"] = f"Error: {str(e)}"
+            print(f"[AI VALIDATION] Job marked as ERROR: {job_id}")
+
+
+@app.route("/api/ai-validation/progress/<job_id>")
+@login_required
+def get_ai_validation_progress(job_id):
+    """Get progress of an AI validation job."""
+    try:
+        job = ai_validation_jobs.get(job_id)
+        if not job:
+            return jsonify({"error": "Job not found"}), 404
+        
+        # Security check: ensure user owns this job
+        if job["user"] != get_username():
+            return jsonify({"error": "Unauthorized"}), 403
+        
+        # Use eligible_count for progress (eligible rows to process)
+        # Use total for reference (total rows in worksheet)
+        eligible_count = job.get("eligible_count", job["total"])
+        
+        response = {
+            "status": job["status"],
+            "total": job["total"],
+            "eligible_count": eligible_count,
+            "processed": job["processed"],
+            "verified": job["verified"],
+            "partial": job["partial"],
+            "conflict": job["conflict"],
+            "not_found": job["not_found"],
+            "errors": job["errors"],
+            "current_status": job["current_status"]
+        }
+        
+        # Include file_key when completed (so frontend knows file is registered in Files)
+        if job["status"] == "completed" and job.get("file_key"):
+            response["file_key"] = job["file_key"]
+        
+        return jsonify(response)
+    
+    except Exception as e:
+        print(f"Error getting progress: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/ai-validation/download/<job_id>")
+@login_required
+def download_ai_validated_file(job_id):
+    """Download the validated Excel file."""
+    try:
+        job = ai_validation_jobs.get(job_id)
+        if not job:
+            return jsonify({"error": "Job not found"}), 404
+        
+        # Security check: ensure user owns this job
+        if job["user"] != get_username():
+            return jsonify({"error": "Unauthorized"}), 403
+        
+        if job["status"] != "completed":
+            return jsonify({"error": "Job not completed"}), 400
+        
+        if not job.get("download_path") or not os.path.exists(job["download_path"]):
+            return jsonify({"error": "File not ready"}), 400
+        
+        filename = f"ai_validated_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        
+        return send_file(
+            job["download_path"],
+            download_name=filename,
+            as_attachment=True,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    
+    except Exception as e:
+        print(f"Error downloading file: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/ai-validation/revalidate/<key>", methods=["POST"])
+@login_required
+def revalidate_file(key):
+    """Re-validate an existing file from the Files system."""
+    print(f"[AI VALIDATION] revalidate_file called for key: {key}")
+    
+    try:
+        user = get_username()
+        if not is_safe_key(key):
+            return jsonify({"error": "Invalid file key"}), 400
+        
+        # Verify file exists and belongs to user
+        draft_path = get_user_draft_path(key)
+        if not draft_path or not os.path.exists(draft_path):
+            return jsonify({"error": "File not found"}), 404
+        
+        # Get validator from request
+        data = request.get_json() or {}
+        validator = data.get("validator", "").strip()
+        if not validator:
+            return jsonify({"error": "Validator required"}), 400
+        
+        print(f"[AI VALIDATION] Re-validating file: {key}, validator: {validator}")
+        
+        # Read the workbook
+        try:
+            with open(draft_path, "rb") as f:
+                workbook_sheets = get_workbook_sheet_map(f)
+            if not workbook_sheets:
+                return jsonify({"error": "Could not read Excel file"}), 400
+        except Exception as e:
+            print(f"[AI VALIDATION] ERROR reading workbook: {e}")
+            return jsonify({"error": f"Could not read Excel file: {str(e)}"}), 400
+        
+        # Detect working sheet (same logic as initial validation)
+        working_sheet_name = detect_working_sheet_name(workbook_sheets) or next(iter(workbook_sheets), "Sheet1")
+        df = workbook_sheets.get(working_sheet_name)
+        
+        if df is None or len(df) == 0:
+            return jsonify({"error": "No data in workbook"}), 400
+        
+        # Generate job ID
+        job_id = f"{user}_{int(time.time())}_{os.urandom(4).hex()}"
+        
+        # Initialize job (same as start_ai_validation)
+        ai_validation_jobs[job_id] = {
+            "status": "processing",
+            "user": user,
+            "validator": validator,
+            "original_filename": key + ".xlsx",
+            "df": df.copy(),
+            "workbook_sheets": workbook_sheets,
+            "working_sheet_name": working_sheet_name,
+            "total": len(df),
+            "eligible_rows": [],
+            "eligible_count": 0,
+            "processed": 0,
+            "verified": 0,
+            "partial": 0,
+            "conflict": 0,
+            "not_found": 0,
+            "errors": 0,
+            "current_status": "Initializing...",
+            "created_at": datetime.now(),
+            "download_path": None,
+            "file_key": None
+        }
+        
+        # Start background processing
+        thread = threading.Thread(target=process_ai_validation_async, args=(job_id,), daemon=True)
+        thread.start()
+        
+        print(f"[AI VALIDATION] Re-validation job started: {job_id}")
+        return jsonify({"ok": True, "job_id": job_id})
+        
+    except Exception as e:
+        print(f"[AI VALIDATION] ERROR in revalidate_file: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":

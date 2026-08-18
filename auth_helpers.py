@@ -3,7 +3,7 @@ Authentication and authorization helpers for role-based access control and audit
 """
 from flask import session, request, jsonify
 from functools import wraps
-from datetime import datetime
+from datetime import datetime, timezone
 from models import db, ActivityLog, User
 import json
 
@@ -69,7 +69,7 @@ def log_activity(user=None, action=None, description=None, lead_id=None, changes
             ip_address=get_client_ip(),
             user_agent=request.headers.get('User-Agent', '')[:255],
             changes=changes_str,
-            created_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc)
         )
         
         db.session.add(log_entry)
