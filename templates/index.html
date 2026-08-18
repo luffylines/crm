@@ -1617,7 +1617,8 @@
       fetch(url).then(r=>r.json()).then(data=>{
         showSpinner(false);
         if(data.error){ alert(data.error); return; }
-        totalRows=data.filtered_total||data.total; resumeIndex=data.resume_index||0;
+        totalRows = Number.isFinite(data.filtered_total) ? data.filtered_total : (Number.isFinite(data.total) ? data.total : 0);
+        resumeIndex = Number.isFinite(data.resume_index) ? data.resume_index : 0;
         showValidatorScreen();
         loadSidebar();
         loadRow(resumeIndex);
@@ -1641,7 +1642,8 @@
           openWorksheetSelection(key, data.worksheets);
           return;
         }
-        totalRows=data.total; resumeIndex=data.resume_index||0;
+        totalRows = Number.isFinite(data.total) ? data.total : 0;
+        resumeIndex = Number.isFinite(data.resume_index) ? data.resume_index : 0;
         showValidatorScreen();
         loadSidebar();
         loadRow(resumeIndex);
@@ -1753,10 +1755,15 @@ function goContacts(){
       setNavState('validate');
     }
 
+  function normalizeRank(val) {
+      return String(val || '').trim().toLowerCase();
+  }
+
   function selectRank(val) {
-      document.getElementById('LeadRanking').value = val;
+      const rank = normalizeRank(val);
+      document.getElementById('LeadRanking').value = rank;
       document.querySelectorAll('.rank-btn').forEach(b => b.classList.remove('selected'));
-      document.querySelectorAll('.rank-btn').forEach(b => { if(b.textContent.trim()===val) b.classList.add('selected'); });
+      document.querySelectorAll('.rank-btn').forEach(b => { if(normalizeRank(b.textContent)===rank) b.classList.add('selected'); });
       document.getElementById('rankRequired').style.display = 'none';
     }
 
@@ -1807,18 +1814,21 @@ function goContacts(){
     function loadSidebar(){
       fetch('/progress').then(r=>r.json()).then(data=>{
         if(!data.rows) return;
-        totalRows = data.total;
+        const doneCount = Number.isFinite(data.done_count) ? data.done_count : 0;
+        const totalCount = Number.isFinite(data.total) ? data.total : 0;
+        totalRows = totalCount;
         filteredQueueIndices = data.rows.map(r => r.index);  // Store the filtered queue indices
         const list=document.getElementById('sidebarList'); list.innerHTML='';
         data.rows.forEach(r=>{
+          const rankName = normalizeRank(r.rank || '');
           const d=document.createElement('div');
-          d.className='sb-item'+(r.done?' done':'')+(r.rank?' rank-'+r.rank:'');
+          d.className='sb-item'+(r.done?' done':'')+(rankName?' rank-'+rankName:'');
           d.id='sitem-'+r.index;
-          d.innerHTML=`<div class="sb-dot ${r.done?'d-done':'d-pend'}"></div><div style="flex:1;min-width:0"><div class="sb-co" title="${r.company}">${r.company||'(no name)'}</div><div class="sb-meta">${r.rank?`<span class="rank-badge rank-${r.rank}" style="font-size:0.55rem;padding:1px 5px">${r.rank}</span>`:''} ${r.done?'· '+(r.validated_by||''):''}</div></div>`;
+          d.innerHTML=`<div class="sb-dot ${r.done?'d-done':'d-pend'}"></div><div style="flex:1;min-width:0"><div class="sb-co" title="${r.company}">${r.company||'(no name)'}</div><div class="sb-meta">${rankName?`<span class="rank-badge rank-${rankName}" style="font-size:0.55rem;padding:1px 5px">${rankName}</span>`:''} ${r.done?'· '+(r.validated_by||''):''}</div></div>`;
           d.onclick=()=>loadRow(r.index);
           list.appendChild(d);
         });
-        document.getElementById('sidebarStats').textContent=`${data.done_count} / ${data.total}`;
+        document.getElementById('sidebarStats').textContent=`${doneCount} / ${totalCount}`;
       }).catch(()=>{});
     }
 
@@ -1842,13 +1852,14 @@ function goContacts(){
       const body=document.getElementById('previewBody'); body.innerHTML='';
       rows.forEach(r=>{
         const tr=document.createElement('tr');
-        const rank=r['Lead Ranking']||'';
+        const rank=normalizeRank(r['Lead Ranking'] || '');
         tr.className=rank?'row-'+rank:'';
         tr.onclick=()=>{switchTab('validate');setTimeout(()=>loadRow(r._index),50);};
         let cells=`<td>${r._index+1}</td>`;
         PREVIEW_COLS.forEach(col=>{
           const val=r[col]||'';
-          cells+=col==='Lead Ranking'&&val?`<td><span class="rank-badge rank-${val}">${val}</span></td>`:`<td title="${val}">${val}</td>`;
+          const safeVal = normalizeRank(val);
+          cells+=col==='Lead Ranking'&&val?`<td><span class="rank-badge rank-${safeVal}">${safeVal}</span></td>`:`<td title="${val}">${val}</td>`;
         });
         cells+=`<td>${r._done?'✓':'—'}</td>`;
         tr.innerHTML=cells; body.appendChild(tr);
@@ -1895,7 +1906,7 @@ function goContacts(){
       document.getElementById('rankReason').textContent=rank_reason||"";
 
       // If row already has a saved rank, select it
-      const savedRank = row["Lead Ranking"]||"";
+      const savedRank = normalizeRank(row["Lead Ranking"] || "");
       if(savedRank) selectRank(savedRank);
 
       setHint("hint_phone","f_Phone",v.phone);
@@ -2109,9 +2120,11 @@ function goContacts(){
     });
 
     function updateProgress(){
-      const pct=Math.round((currentIndex/totalRows)*100);
-      document.getElementById("progressBar").style.width=pct+"%";
-      document.getElementById("progressText").textContent=`${currentIndex+1} / ${totalRows}`;
+      const current = Number.isFinite(currentIndex) ? currentIndex : 0;
+      const total = Number.isFinite(totalRows) ? totalRows : 0;
+      const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+      document.getElementById("progressBar").style.width = pct + "%";
+      document.getElementById("progressText").textContent = `${total > 0 ? current + 1 : 0} / ${total}`;
     }
 
     function showDone(){

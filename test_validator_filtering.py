@@ -39,31 +39,26 @@ class TestValidatorFiltering(unittest.TestCase):
         """Test filtering for Christian validator."""
         df = self.create_test_dataframe()
         validated, filtered = build_filtered_queue(df, "Christian")
-        
-        # Christian has rows 0, 2, 5
-        # Row 2 has empty Lead Ranking - should be included
-        # Rows 0, 5 have empty Lead Ranking - should be included
+
+        # Christian has rows 0, 2, 5. Completed rows remain visible in the progress list,
+        # but resume logic should still skip them when choosing the next incomplete row.
         expected_filtered = [0, 2, 5]
-        
-        self.assertEqual(filtered, expected_filtered, 
+
+        self.assertEqual(filtered, expected_filtered,
                         f"Christian's queue should be {expected_filtered}, got {filtered}")
-        self.assertIn(1, validated, "Row 1 (Asia) should be marked as validated")
-        self.assertIn(4, validated, "Row 4 (Asia) should be marked as validated")
+        self.assertEqual(validated, set(), "Christian has no completed rows in this dataset")
     
     def test_build_filtered_queue_asia(self):
         """Test filtering for Asia validator."""
         df = self.create_test_dataframe()
         validated, filtered = build_filtered_queue(df, "Asia")
-        
-        # Asia has rows 1, 4
-        # Row 1 has 'better' ranking - should NOT be included (already completed)
-        # Row 4 has 'best' ranking - should NOT be included (already completed)
-        expected_filtered = []
-        
+
+        # Completed rows remain visible in the progress list for their assigned validator.
+        expected_filtered = [1, 4]
+
         self.assertEqual(filtered, expected_filtered,
-                        f"Asia's queue should be empty (all completed), got {filtered}")
-        self.assertIn(1, validated, "Row 1 (Asia with 'better') should be in validated")
-        self.assertIn(4, validated, "Row 4 (Asia with 'best') should be in validated")
+                        f"Asia's queue should include completed rows in the progress list, got {filtered}")
+        self.assertEqual(validated, {1, 4}, "Completed rows should be marked as validated")
     
     def test_build_filtered_queue_vincent(self):
         """Test filtering for Vincent validator."""
@@ -132,30 +127,29 @@ class TestValidatorFiltering(unittest.TestCase):
         """Test filtering when no validator is selected."""
         df = self.create_test_dataframe()
         validated, filtered = build_filtered_queue(df, None)
-        
-        # Without validator filter, should return all unvalidated rows
-        # Rows 1 and 4 have rankings (validated), others don't
-        expected_unvalidated = [0, 2, 3, 5]
-        
-        self.assertEqual(filtered, expected_unvalidated,
-                        f"Should return unvalidated rows when no validator selected, got {filtered}")
+
+        # When no validator is selected, all assigned rows remain visible in the full progress list,
+        # while the resume logic still skips already-completed rows.
+        expected_filtered = [0, 1, 2, 3, 4, 5]
+
+        self.assertEqual(filtered, expected_filtered,
+                        f"Should return all rows in the full progress list when no validator is selected, got {filtered}")
+        self.assertEqual(validated, {1, 4}, "Validated rows should still be tracked")
     
-    def test_completed_rows_not_in_queue(self):
-        """Test that rows with Lead Ranking are not in the validation queue."""
+    def test_completed_rows_visible_in_progress(self):
+        """Test that rows with Lead Ranking remain visible in the progress list."""
         df = pd.DataFrame({
             "Company": ["A", "B", "C", "D"],
             "Validated By": ["John", "John", "John", "John"],
             "Lead Ranking": ["", "good", "", "bad"],
         })
-        
+
         validated, filtered = build_filtered_queue(df, "John")
-        
-        # Should only include rows 0 and 2 (with empty ranking)
-        expected_filtered = [0, 2]
+
+        expected_filtered = [0, 1, 2, 3]
         self.assertEqual(filtered, expected_filtered,
-                        f"Should exclude completed rows, got {filtered}")
-        
-        # Rows 1 and 3 should be marked as validated
+                        f"Should keep all assigned rows visible in the progress list, got {filtered}")
+
         self.assertIn(1, validated, "Row 1 with 'good' ranking should be validated")
         self.assertIn(3, validated, "Row 3 with 'bad' ranking should be validated")
     

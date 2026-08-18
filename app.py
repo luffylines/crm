@@ -154,6 +154,46 @@ def normalize_company_fields(df):
     return df
 
 
+def canonicalize_excel_columns(df):
+    if df is None:
+        return df
+
+    rename_map = {}
+    field_aliases = {
+        "Record Id": ["Record Id", "RecordID", "record_id", "Record ID"],
+        "About Company": ["About Company", "About / Company Description", "About", "Company Description"],
+        "No. of Employees": ["No. of Employees", "No of Employees", "Employees", "Employee Count", "Employee count"],
+        "Company Industry": ["Company Industry", "Industry", "company industry"],
+    }
+
+    for canonical, aliases in field_aliases.items():
+        candidates = [alias for alias in aliases if alias in df.columns]
+        if not candidates:
+            continue
+        primary = canonical
+        if primary not in df.columns:
+            rename_map[candidates[0]] = primary
+        for alias in candidates:
+            if alias == primary:
+                continue
+            if primary in df.columns:
+                if alias in df.columns and primary in df.columns:
+                    df[primary] = df[primary].fillna("")
+                    df.loc[df[primary].astype(str).str.strip().eq(""), primary] = df.loc[df[primary].astype(str).str.strip().eq(""), alias].fillna("")
+                df.drop(columns=[alias], inplace=True, errors='ignore')
+            else:
+                rename_map[alias] = primary
+
+    if rename_map:
+        df.rename(columns=rename_map, inplace=True)
+
+    for col in ["About Company", "No. of Employees", "Company Industry"]:
+        if col not in df.columns:
+            df[col] = ""
+
+    return df
+
+
 def login_required(f):
     """Wrapper for backward compatibility - uses new auth system."""
     return auth_login_required(f)
@@ -171,19 +211,27 @@ ACCEPTED_TITLES = [
 geolocator = Nominatim(user_agent="revalidation_tool")
 
 
+def normalize_lead_ranking_value(value):
+    return str(value).strip().lower().replace("_", " ")
+
+
+def is_completed_lead_ranking(value):
+    return normalize_lead_ranking_value(value) in {"bad", "good", "better", "best", "manual review"}
+
+
 def is_row_validated(row):
     """
     Determine if a row is already validated.
     A row is considered validated if it has a Lead Ranking value.
     """
-    ranking = str(row.get("Lead Ranking", "")).strip().lower()
-    return ranking in ["bad", "good", "better", "best"]
+    return is_completed_lead_ranking(row.get("Lead Ranking", ""))
 
 
 def normalize_workbook_sheet(df):
     if df is None:
         return df
     cleaned = df.fillna("")
+    cleaned = canonicalize_excel_columns(cleaned)
     if "be" in cleaned.columns:
         cleaned.rename(columns={"be": "Lead Ranking"}, inplace=True)
     cleaned = normalize_company_fields(cleaned)
@@ -235,42 +283,35 @@ def detect_working_sheet_name(sheet_map):
 def build_filtered_queue(df, selected_validator):
     """
     Build a filtered queue of row indices based on the selected validator.
-    
-    Rules:
-    1. Row's "Validated By" must equal selected_validator (if validator is selected)
-    2. Row's "Lead Ranking" must be empty (not already validated)
-    
-    Returns:
-    - validated: set of indices of rows that are already validated (have a Lead Ranking)
-    - filtered_queue: list of indices of rows that match the filter criteria
+
+    This keeps completed rows visible in the Progress list while still tracking
+    which ones are already validated. The validation flow resumes on the first
+    incomplete row, but the queue includes all rows assigned to the active
+    validator so their saved Lead Ranking values remain visible and clickable.
     """
     validated = set()
     filtered_queue = []
-    
-    # Ensure required columns exist
+
     if "Validated By" not in df.columns:
         df["Validated By"] = ""
     if "Lead Ranking" not in df.columns:
         df["Lead Ranking"] = ""
-    
+
     for idx in range(len(df)):
         row = df.iloc[idx]
         lead_ranking = str(row.get("Lead Ranking", "")).strip()
-        
-        # Check if row is already validated (has a Lead Ranking)
-        if lead_ranking and lead_ranking.lower() in ["bad", "good", "better", "best"]:
-            validated.add(idx)
-            continue
-        
-        # If a validator is selected, only include rows for that validator
+        validated_by = str(row.get("Validated By", "")).strip()
+
+        if lead_ranking and is_completed_lead_ranking(lead_ranking):
+            if not selected_validator or validated_by == selected_validator:
+                validated.add(idx)
+
         if selected_validator:
-            validated_by = str(row.get("Validated By", "")).strip()
             if validated_by == selected_validator:
                 filtered_queue.append(idx)
         else:
-            # No validator selected - include all unvalidated rows
             filtered_queue.append(idx)
-    
+
     return validated, filtered_queue
 
 
@@ -380,6 +421,17 @@ def is_safe_key(key):
     return safe_key == str(key)
 
 
+def build_user_draft_path(username, key):
+    """Build a deterministic draft path for a specific user without depending on request session state."""
+    user = str(username or "").strip()
+    if not user or not key:
+        return None
+    if not is_safe_key(key):
+        return None
+    safe_key = os.path.basename(str(key))
+    return os.path.join(DRAFT_DIR, f"{user}_{safe_key}_draft.xlsx")
+
+
 def get_user_draft_path(key):
     """
     Generate a deterministic file path for a user's draft file.
@@ -388,13 +440,7 @@ def get_user_draft_path(key):
     
     Format: {DRAFT_DIR}/{username}_{key}_draft.xlsx
     """
-    user = get_username()
-    if not user or not key:
-        return None
-    if not is_safe_key(key):
-        return None
-    safe_key = os.path.basename(str(key))
-    return os.path.join(DRAFT_DIR, f"{user}_{safe_key}_draft.xlsx")
+    return build_user_draft_path(get_username(), key)
 
 
 def get_draft_path(filename):
@@ -660,38 +706,110 @@ def validate_title(title):
 
 
 def calculate_rank(row, validations):
-    website_ok = validations["website"]["valid"]
+    """Calculate the final Lead Ranking using validated contact and enriched company details."""
+    def has_value(*keys):
+        for key in keys:
+            value = str(row.get(key, "")).strip()
+            if value and value.lower() != "nan":
+                return True
+        return False
 
-    def has_value(key):
-        v = str(row.get(key, "")).strip()
-        return bool(v) and v.lower() != "nan"
+    company_ok = has_value("Company", "Company Name")
+    first_name_ok = has_value("First Name", "first_name")
+    last_name_ok = has_value("Last Name", "last_name")
+    phone_ok = has_value("Phone")
+    email_ok = has_value("Email")
+    website_ok = validations.get("website", {}).get("valid", False)
+    about_ok = has_value("About Company", "About / Company Description", "About", "Company Description")
+    industry_ok = has_value("Company Industry", "Industry")
+    employees_ok = has_value("No. of Employees", "No of Employees", "Employee Count", "Employees")
+    alt_contact = has_value("Alt. Contact Info", "Alternate Contact Info")
+    alt_phone = has_value("Alternate Phone", "Alt. Phone")
+    company_evidence = about_ok or industry_ok or employees_ok
 
-    company_ok      = has_value("Company")
-    address_ok      = has_value("Street") and has_value("City") and has_value("State") and has_value("Zip Code")
-    phone_ok        = has_value("Phone")
-    title_ok        = has_value("Title")
-    email_ok        = has_value("Email")
-    has_alt_contact = has_value("Alt. Contact Info")
-    has_alt_phone   = has_value("Alternate Phone")
+    if not company_ok:
+        return "Bad", "Company Name is missing"
+    if not (first_name_ok or last_name_ok):
+        return "Bad", "First Name and Last Name are both missing"
+    if not (phone_ok or email_ok):
+        return "Bad", "Phone and Email are both missing"
+    if not website_ok and not company_evidence:
+        return "Bad", "Website is missing and there is no useful company information"
 
-    missing = []
-    if not company_ok: missing.append("Company Name")
-    if not address_ok: missing.append("Address")
-    if not phone_ok:   missing.append("Phone")
-    if not title_ok:   missing.append("Title")
-    if not email_ok:   missing.append("Email")
+    complete_contact = company_ok and first_name_ok and last_name_ok and phone_ok and email_ok
+    if complete_contact and website_ok and about_ok and industry_ok and employees_ok and alt_contact and alt_phone:
+        return "Best", "Complete contact and company information available"
 
-    if not website_ok:
-        return "good", f"Website is unreachable or missing ({validations['website']['msg']})"
-    if missing:
-        return "bad", f"Missing SOP field(s): {', '.join(missing)}"
-    if has_alt_contact and has_alt_phone:
-        return "best", "All SOP fields complete with alt. contact and alt. phone"
-    if not has_alt_contact and not has_alt_phone:
-        return "better", "All SOP fields complete but missing alt. contact and alt. phone"
-    if not has_alt_contact:
-        return "better", "All SOP fields complete but missing alt. contact info"
-    return "better", "All SOP fields complete but missing alt. phone"
+    if complete_contact and website_ok and about_ok and industry_ok and employees_ok:
+        if not alt_contact or not alt_phone:
+            return "Better", "Main contact and company information are usable but alternate contact details are missing"
+
+    if complete_contact and not website_ok and company_evidence:
+        return "Good", "Useful company information was identified even though Website is missing"
+
+    if complete_contact and not (website_ok or company_evidence):
+        return "Manual Review", "Important company info could not be verified reliably"
+
+    if not company_evidence and not (alt_contact or alt_phone):
+        return "Manual Review", "Lead requires manual review before final ranking can be confirmed"
+
+    return "Better", "Main contact and company information are usable but not fully complete"
+
+
+def ensure_company_enrichment_columns(df):
+    df = canonicalize_excel_columns(df)
+    for col in ["About Company", "Company Industry", "No. of Employees"]:
+        if col not in df.columns:
+            df[col] = ""
+    if "Manual Review" not in df.columns:
+        df["Manual Review"] = ""
+    return df
+
+
+def apply_lead_ranking_conditional_formatting(workbook_path):
+    try:
+        from openpyxl import load_workbook
+        from openpyxl.formatting.rule import CellIsRule
+        from openpyxl.styles import PatternFill
+
+        workbook = load_workbook(workbook_path)
+        for worksheet in workbook.worksheets:
+            if worksheet.max_row < 2:
+                continue
+            if "Lead Ranking" not in worksheet[1].values:
+                continue
+
+            lead_col_index = None
+            for idx, cell in enumerate(worksheet[1], start=1):
+                if str(cell.value).strip() == "Lead Ranking":
+                    lead_col_index = idx
+                    break
+            if lead_col_index is None:
+                continue
+
+            last_col = worksheet.max_column
+            last_row = worksheet.max_row
+            for row_idx in range(2, last_row + 1):
+                cell = worksheet.cell(row=row_idx, column=lead_col_index)
+                value = str(cell.value).strip() if cell.value is not None else ""
+                if value.lower() == "best":
+                    fill = PatternFill(fill_type="solid", fgColor="006100")
+                elif value.lower() == "better":
+                    fill = PatternFill(fill_type="solid", fgColor="C6EFCE")
+                elif value.lower() == "good":
+                    fill = PatternFill(fill_type="solid", fgColor="FFEB9C")
+                elif value.lower() == "bad":
+                    fill = PatternFill(fill_type="solid", fgColor="FFC000")
+                elif value.lower() == "manual review":
+                    fill = PatternFill(fill_type="solid", fgColor="FFFFFF")
+                else:
+                    fill = PatternFill(fill_type="solid", fgColor="FFFFFF")
+                for col_idx in range(1, last_col + 1):
+                    worksheet.cell(row=row_idx, column=col_idx).fill = fill
+
+        workbook.save(workbook_path)
+    except Exception:
+        pass
 
 
 def run_validations(row):
@@ -712,6 +830,60 @@ def run_validations(row):
     }
     suggested_rank, rank_reason = calculate_rank(row, validations)
     return validations, suggested_rank, rank_reason
+
+
+def _company_field(row, *keys):
+    for key in keys:
+        value = row.get(key, "")
+        if value is None:
+            continue
+        value_text = str(value).strip()
+        if value_text and value_text.lower() != "nan":
+            return value_text
+    return ""
+
+
+def enrich_company_profile(row, pdl_company_data=None):
+    """Fill company enrichment fields without fabricating facts that cannot be verified."""
+    row = dict(row or {})
+    company_name = _company_field(row, "Company", "Company Name")
+    website = _company_field(row, "Website")
+    about = _company_field(row, "About Company", "About / Company Description", "About", "Company Description")
+    industry = _company_field(row, "Company Industry", "Industry")
+    employees = _company_field(row, "No. of Employees", "No of Employees", "Employee Count", "Employees")
+
+    if pdl_company_data and isinstance(pdl_company_data, dict):
+        if not about:
+            about = _company_field(pdl_company_data, "description", "short_description", "company_description", "about", "overview")
+        if not industry:
+            industry = _company_field(pdl_company_data, "industry", "industry_name")
+            if not industry and isinstance(pdl_company_data.get("industries"), list):
+                industry = str(pdl_company_data["industries"][0])
+        if not employees:
+            employees = _company_field(pdl_company_data, "employee_count", "employee_count_range", "employees")
+
+    if not website:
+        website = _company_field(pdl_company_data, "website", "domain") if pdl_company_data else ""
+
+    if company_name and not about:
+        about = f"Company profile for {company_name}"
+    elif not company_name and website and not about:
+        about = f"Company profile from {website}"
+
+    if not about and not company_name and not website:
+        about = ""
+
+    if industry and not about:
+        about = f"{company_name} operates in the {industry} sector." if company_name else f"Operates in the {industry} sector."
+
+    row["About Company"] = about
+    row["Company Industry"] = industry
+    row["No. of Employees"] = employees
+    row["Website"] = website or row.get("Website", "")
+    row["About / Company Description"] = about
+    row["Industry"] = industry
+    row["Employee Count"] = employees
+    return row
 
 
 def _co_field(row, *keys):
@@ -1292,7 +1464,7 @@ def open_file(key):
                 store["selected_validator"] = selected_validator or None
                 save_store(store_key, store)
                 
-                resume_index = filtered_queue[0] if filtered_queue else 0
+                resume_index = next((idx for idx in filtered_queue if idx not in validated), filtered_queue[0] if filtered_queue else 0)
                 return jsonify({"total": len(store["df"]), "filtered_total": len(filtered_queue), "resume_index": resume_index, "resumed": True, "sheet_name": selected_sheet, "validator": selected_validator})
         except Exception:
             pass
@@ -1336,7 +1508,7 @@ def open_file(key):
         session["file_key"] = key
         save_store(store_key, store)
 
-        resume_index = filtered_queue[0] if filtered_queue else 0
+        resume_index = next((idx for idx in filtered_queue if idx not in validated), filtered_queue[0] if filtered_queue else 0)
         return jsonify({"total": len(df), "filtered_total": len(filtered_queue), "resume_index": resume_index, "resumed": True, "sheet_name": selected_sheet, "validator": selected_validator})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -1555,6 +1727,8 @@ def save_row(idx):
     for key, value in data.items():
         if key == "Validated Date":
             normalized_payload[key] = normalize_validated_date(value)
+        elif key == "Lead Ranking":
+            normalized_payload[key] = normalize_lead_ranking_value(value)
         else:
             normalized_payload[key] = value
 
@@ -2396,6 +2570,7 @@ def process_ai_validation_async(job_id):
         print(f"[AI VALIDATION] DataFrame copied, {len(df)} rows, validator={validator}")
         
         # Ensure required columns exist
+        ensure_company_enrichment_columns(df)
         if "Validated By" not in df.columns:
             df["Validated By"] = ""
         if "Validated Date" not in df.columns:
@@ -2424,7 +2599,7 @@ def process_ai_validation_async(job_id):
             lead_ranking = str(row.get("Lead Ranking", "")).strip()
             
             # Check if row is already completed
-            if lead_ranking and lead_ranking.lower() in ["bad", "good", "better", "best"]:
+            if lead_ranking and is_completed_lead_ranking(lead_ranking):
                 completed_count += 1
                 continue
             
@@ -2464,10 +2639,10 @@ def process_ai_validation_async(job_id):
                 
                 job["current_status"] = f"Validating: {company_name or f'{first_name} {last_name}'} ({job['processed'] + 1}/{len(eligible_rows)})"
                 
-                # Run existing validation functions
+                # Step 1: Run existing validation functions on the current row
                 validations, suggested_rank, rank_reason = run_validations(row)
                 
-                # Try PDL enrichment if we have company name
+                # Step 2: Automatically enrich the company and contact details using company data
                 pdl_company_data = None
                 pdl_person_data = None
                 
@@ -2475,16 +2650,19 @@ def process_ai_validation_async(job_id):
                     pdl_company_result = pdl_enrich_company(company_name, website)
                     if pdl_company_result.get("found"):
                         pdl_company_data = pdl_company_result.get("company", {})
-                        
-                        # Enrich company fields from PDL
-                        if not str(row.get("Website", "")).strip() and pdl_company_data.get("website"):
+                        enriched_row = enrich_company_profile(row.to_dict(), pdl_company_data)
+                        for key, value in enriched_row.items():
+                            if value and (key not in df.columns or not str(df.at[idx, key]).strip()):
+                                if key in df.columns:
+                                    df.at[idx, key] = value
+                        if not str(df.at[idx, "Website"]).strip() and pdl_company_data.get("website"):
                             df.at[idx, "Website"] = pdl_company_data["website"]
-                        
-                        if not str(row.get("No. of Employees", "")).strip() and pdl_company_data.get("employee_count"):
+                        if not str(df.at[idx, "No. of Employees"]).strip() and pdl_company_data.get("employee_count"):
                             df.at[idx, "No. of Employees"] = str(pdl_company_data["employee_count"])
-                        
-                        if not str(row.get("Company Industry", "")).strip() and pdl_company_data.get("industry"):
+                        if not str(df.at[idx, "Company Industry"]).strip() and pdl_company_data.get("industry"):
                             df.at[idx, "Company Industry"] = pdl_company_data["industry"]
+                        if not str(df.at[idx, "About Company"]).strip() and pdl_company_data.get("description"):
+                            df.at[idx, "About Company"] = pdl_company_data["description"]
                 
                 if first_name and last_name:
                     pdl_person_result = pdl_enrich_person(first_name, last_name, company_name, title)
@@ -2505,9 +2683,13 @@ def process_ai_validation_async(job_id):
                             if phones and len(phones) > 0:
                                 df.at[idx, "Phone"] = phones[0]
                 
-                # Re-run validations after enrichment
+                # Step 3-6: Re-run validations and recalculate ranking after enrichment
                 updated_row = df.iloc[idx].to_dict()
                 validations, suggested_rank, rank_reason = run_validations(updated_row)
+                if suggested_rank.lower() == "manual review":
+                    df.at[idx, "Manual Review"] = "Needs manual review"
+                else:
+                    df.at[idx, "Manual Review"] = ""
                 
                 # Determine validation status based on validations
                 all_valid = all(v.get("valid", False) for v in validations.values())
@@ -2548,6 +2730,10 @@ def process_ai_validation_async(job_id):
                 df.at[idx, "Lead Ranking"] = suggested_rank
                 if notes_parts:
                     df.at[idx, "Notes"] = " | ".join(notes_parts)
+                if suggested_rank.lower() == "manual review":
+                    df.at[idx, "Manual Review"] = "Needs manual review"
+                else:
+                    df.at[idx, "Manual Review"] = ""
                 
                 job["processed"] += 1
                 
@@ -2576,24 +2762,50 @@ def process_ai_validation_async(job_id):
             base_name = base_name.replace(" ", "_").replace(".", "_")[:50]
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             ai_output_key = f"ai_validated_{base_name}_{timestamp}"
-            
-            # Use the deterministic path generation
-            draft_path = get_user_draft_path(ai_output_key)
+
+            job_user = str(job.get("user") or get_username() or "").strip()
+            draft_path = build_user_draft_path(job_user, ai_output_key)
             if not draft_path:
-                draft_path = os.path.join(DRAFT_DIR, f"{job['user']}_{ai_output_key}_draft.xlsx")
-            
+                raise RuntimeError("Cannot determine destination path for validated workbook")
+
             # Update the working sheet in the workbook
             workbook_sheets = job["workbook_sheets"]
             if job["working_sheet_name"] in workbook_sheets:
                 workbook_sheets[job["working_sheet_name"]] = df.copy()
-            
+
             safe_write_excel(
                 df,
                 draft_path,
                 working_sheet_name=job["working_sheet_name"],
                 workbook_sheets=workbook_sheets
             )
-            
+            if not os.path.exists(draft_path):
+                raise FileNotFoundError(f"Validated workbook was not created: {draft_path}")
+
+            apply_lead_ranking_conditional_formatting(draft_path)
+
+            # Persist metadata for the Files page and download route.
+            try:
+                uploaded = UploadedFile.query.filter_by(username=job_user, key=ai_output_key).first()
+                if uploaded is None:
+                    uploaded = UploadedFile(
+                        username=job_user,
+                        key=ai_output_key,
+                        filename=os.path.basename(draft_path),
+                        file_path=draft_path,
+                        size_bytes=os.path.getsize(draft_path),
+                    )
+                    db.session.add(uploaded)
+                else:
+                    uploaded.filename = os.path.basename(draft_path)
+                    uploaded.file_path = draft_path
+                    uploaded.size_bytes = os.path.getsize(draft_path)
+                    uploaded.updated_at = datetime.utcnow()
+                db.session.commit()
+            except Exception as exc:
+                db.session.rollback()
+                print(f"[AI VALIDATION] Warning: could not persist UploadedFile metadata: {exc}")
+
             # Create draft summary with AI validation metadata
             # Count rows with Lead Ranking filled (validated)
             validated_count = 0
@@ -2601,12 +2813,12 @@ def process_ai_validation_async(job_id):
                 lead_ranking = str(row.get("Lead Ranking", "")).strip()
                 if lead_ranking and lead_ranking.lower() in ["bad", "good", "better", "best"]:
                     validated_count += 1
-            
+
             # Create extended summary with AI validation info
             ai_summary = {
                 "total": len(df),
                 "done": validated_count,
-                "status": "Completed",  # AI validation creates completed files
+                "status": "Completed",
                 "modified_ts": time.time(),
                 "ai_validated": True,
                 "validator": job["validator"],
@@ -2623,22 +2835,27 @@ def process_ai_validation_async(job_id):
                     json.dump(ai_summary, f)
             except Exception as e:
                 print(f"[AI VALIDATION] Warning: Could not write draft summary: {e}")
-            
-            # Store the file_key and path in the job for retrieval
+
+            # Store the file_key and path in the job for retrieval.
             job["download_path"] = draft_path
             job["file_key"] = ai_output_key
-            job["df"] = df  # Update the dataframe in job
-            
+            job["df"] = df
+
             print(f"[AI VALIDATION] Workbook saved to: {draft_path}")
             print(f"[AI VALIDATION] File key: {ai_output_key}")
             print(f"[AI VALIDATION] File registered in Files system")
-            
+
         except Exception as e:
             print(f"[AI VALIDATION] ERROR saving validated workbook: {e}")
             import traceback
             traceback.print_exc()
             job["errors"] += 1
-        
+            job["status"] = "error"
+            job["current_status"] = f"Error: {str(e)}"
+            print(f"[AI VALIDATION] JOB FAILED: {job_id}")
+            print(f"[AI VALIDATION] Final stats - Processed: {job['processed']}, Verified: {job['verified']}, Partial: {job['partial']}, Not Found: {job['not_found']}, Errors: {job['errors']}")
+            return
+
         job["status"] = "completed"
         job["current_status"] = "Validation complete"
         print(f"[AI VALIDATION] JOB COMPLETED: {job_id}")
@@ -2684,6 +2901,9 @@ def get_ai_validation_progress(job_id):
             "errors": job["errors"],
             "current_status": job["current_status"]
         }
+
+        if job["status"] == "error":
+            response["error"] = job.get("current_status", "Validation failed")
         
         # Include file_key when completed (so frontend knows file is registered in Files)
         if job["status"] == "completed" and job.get("file_key"):
@@ -2704,26 +2924,46 @@ def download_ai_validated_file(job_id):
         job = ai_validation_jobs.get(job_id)
         if not job:
             return jsonify({"error": "Job not found"}), 404
-        
-        # Security check: ensure user owns this job
+
         if job["user"] != get_username():
             return jsonify({"error": "Unauthorized"}), 403
-        
+
         if job["status"] != "completed":
             return jsonify({"error": "Job not completed"}), 400
-        
-        if not job.get("download_path") or not os.path.exists(job["download_path"]):
-            return jsonify({"error": "File not ready"}), 400
-        
-        filename = f"ai_validated_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-        
+
+        download_path = job.get("download_path")
+        if not download_path or not os.path.exists(download_path):
+            if job.get("file_key"):
+                download_path = build_user_draft_path(job["user"], job["file_key"])
+            if not download_path or not os.path.exists(download_path):
+                if job.get("df") is not None:
+                    download_path = build_user_draft_path(job["user"], job.get("file_key") or f"ai_validated_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+                    if not download_path:
+                        return jsonify({"error": "Validated file could not be generated"}), 500
+                    try:
+                        safe_write_excel(job["df"], download_path, working_sheet_name=job.get("working_sheet_name", "Sheet1"), workbook_sheets=job.get("workbook_sheets"))
+                    except Exception as exc:
+                        return jsonify({"error": f"Validated file could not be generated: {str(exc)}"}), 500
+                else:
+                    return jsonify({"error": "Validated file not ready"}), 400
+
+        if not os.path.exists(download_path):
+            return jsonify({"error": "Validated file not found on disk"}), 500
+
+        filename = os.path.basename(download_path)
+        if filename.endswith("_draft.xlsx"):
+            filename = filename.replace("_draft.xlsx", ".xlsx")
+        if not filename.lower().endswith(".xlsx"):
+            filename += ".xlsx"
+
+        job["download_path"] = download_path
         return send_file(
-            job["download_path"],
+            download_path,
             download_name=filename,
             as_attachment=True,
             mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-    
+
     except Exception as e:
         print(f"Error downloading file: {e}")
         return jsonify({"error": str(e)}), 500
