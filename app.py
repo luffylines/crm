@@ -24,7 +24,7 @@ dotenv_path = os.path.join(os.path.dirname(__file__), ".env")
 load_dotenv(dotenv_path)
 
 # Import models and auth helpers
-from models import db, User, ActivityLog
+from models import db, User, ActivityLog, UploadedFile
 from auth_helpers import (
     login_required as auth_login_required,
     admin_required,
@@ -58,7 +58,7 @@ PDL_BASE_URL = "https://api.peopledatalabs.com/v5"
 
 app = Flask(__name__)
 
-app.config["SECRET_KEY"] = os.getenv("FLASK_SECRET_KEY")
+app.config["SECRET_KEY"] = os.getenv("FLASK_SECRET_KEY") or "dev-secret-key-change-me"
 
 # Database configuration
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -71,9 +71,49 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 # Initialize database
 db.init_app(app)
 
+
+def ensure_default_users(users_file_path=None):
+    """Seed the default login accounts from users.json when the DB is empty."""
+    default_path = users_file_path or os.path.join(os.path.dirname(__file__), "users.json")
+    if not os.path.exists(default_path):
+        return False
+
+    if User.query.count() > 0:
+        return False
+
+    try:
+        with open(default_path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return False
+
+    created = 0
+    for user_data in data.get("users", []) or []:
+        username = str(user_data.get("username", "")).strip().lower()
+        password = user_data.get("password", "")
+
+        if not username or not password:
+            continue
+
+        if User.query.filter_by(username=username).first():
+            continue
+
+        role = "Admin" if username == "admin" else "User"
+        user = User(username=username, role=role, is_active=True)
+        user.set_password(password)
+        db.session.add(user)
+        created += 1
+
+    if created:
+        db.session.commit()
+
+    return created > 0
+
+
 # Create tables on app startup
 with app.app_context():
     db.create_all()
+    ensure_default_users()
 
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
@@ -1384,6 +1424,27 @@ def upload():
     write_draft_summary(draft_path, df, validated)
     save_store(store_key, store)
 
+    try:
+        uploaded = UploadedFile.query.filter_by(username=user, key=key).first()
+        if uploaded is None:
+            uploaded = UploadedFile(
+                username=user,
+                key=key,
+                filename=filename,
+                file_path=draft_path,
+                size_bytes=os.path.getsize(draft_path) if os.path.exists(draft_path) else 0,
+            )
+            db.session.add(uploaded)
+        else:
+            uploaded.filename = filename
+            uploaded.file_path = draft_path
+            uploaded.size_bytes = os.path.getsize(draft_path) if os.path.exists(draft_path) else 0
+            uploaded.updated_at = datetime.utcnow()
+        db.session.commit()
+    except Exception as exc:
+        print(f"Failed to persist uploaded file metadata: {exc}")
+        db.session.rollback()
+
     return jsonify({"total": len(df), "columns": list(df.columns), "resume_index": resume_index, "resumed": os.path.exists(draft_path), "user": user})
 
 
@@ -1620,6 +1681,54 @@ def download_file_by_key(key):
         as_attachment=True,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
+
+@app.route("/delete/<key>", methods=["POST"])
+@login_required
+def delete_uploaded_file(key):
+    """Delete a user's draft file and its metadata after confirmation."""
+    user = get_username()
+    if not user:
+        return jsonify({"error": "Not logged in"}), 401
+
+    if not is_safe_key(key):
+        return jsonify({"error": "Invalid file key"}), 400
+
+    safe_key = os.path.basename(str(key))
+    draft_path = get_user_draft_path(safe_key)
+    if not draft_path:
+        return jsonify({"error": "Invalid file key"}), 400
+
+    try:
+        db_record = UploadedFile.query.filter_by(username=user, key=safe_key).first()
+        if db_record is not None:
+            db.session.delete(db_record)
+
+        for candidate in [draft_path, os.path.join(DRAFT_DIR, f"{user}_{safe_key}.pkl")]:
+            if candidate and os.path.exists(candidate):
+                os.remove(candidate)
+
+        summary_path = get_draft_summary_path(draft_path)
+        if os.path.exists(summary_path):
+            os.remove(summary_path)
+
+        if db_record is not None and db_record.file_path and os.path.exists(db_record.file_path) and os.path.abspath(db_record.file_path) != os.path.abspath(draft_path):
+            os.remove(db_record.file_path)
+
+        db.session.commit()
+
+        log_activity(
+            user=user,
+            action="DELETE_FILE",
+            description=f"Deleted file: {safe_key}",
+            lead_id=safe_key
+        )
+
+        return jsonify({"ok": True, "message": "File deleted successfully."})
+    except Exception as exc:
+        db.session.rollback()
+        print(f"Error deleting file {safe_key}: {exc}")
+        return jsonify({"error": "Unable to delete file. Please try again."}), 500
 
 
 # ============================================================================

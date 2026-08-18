@@ -79,3 +79,36 @@ class ActivityLog(db.Model):
     
     def __repr__(self):
         return f'<ActivityLog {self.user.username} - {self.action}>'
+
+
+class UploadedFile(db.Model):
+    """Metadata for uploaded Excel files stored under the drafts directory."""
+    __tablename__ = 'uploaded_files'
+
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), nullable=False, index=True)
+    key = db.Column(db.String(255), nullable=False, index=True)
+    filename = db.Column(db.String(255), nullable=False)
+    file_path = db.Column(db.String(500), nullable=False)
+    size_bytes = db.Column(db.Integer, nullable=False, default=0)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint('username', 'key', name='uq_uploaded_file_user_key'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'username': self.username,
+            'key': self.key,
+            'filename': self.filename,
+            'file_path': self.file_path,
+            'size_bytes': self.size_bytes,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+    def __repr__(self):
+        return f'<UploadedFile {self.username}:{self.key}>'
