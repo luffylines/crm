@@ -1801,13 +1801,19 @@ function goContacts(){
     }
 
     function loadRow(idx){
+      const nextToken = Date.now() + Math.random();
+      currentSaveToken = nextToken;
       showSpinner(true);
+      lastSavedSignature = null;
       fetch(`/row/${idx}`).then(r=>r.json()).then(data=>{
+        if (nextToken !== currentSaveToken) return;
         showSpinner(false);
         if(data.done){showDone();return;}
         currentRow=data.row; currentIndex=data.index; totalRows=data.total;
         renderRow(data.row,data.validations,data.suggested_rank,data.rank_reason);
         updateProgress(); highlightSidebar(idx);
+      }).catch(()=>{
+        if (nextToken === currentSaveToken) showSpinner(false);
       });
     }
 
@@ -1948,7 +1954,12 @@ function goContacts(){
       if(fId){const f=document.getElementById(fId);if(f)f.className="f "+(v.valid?"fv":"fi");}
     }
 
+    let saveInFlight = false;
+    let lastSavedSignature = null;
+    let currentSaveToken = 0;
+
     function saveAndNext(){
+      if (saveInFlight) return;
       const rank=document.getElementById('LeadRanking').value;
       if(!rank){
         document.getElementById('rankRequired').style.display='inline';
@@ -1959,6 +1970,13 @@ function goContacts(){
         document.getElementById('NumEmployees').focus();
         return;
       }
+
+      const saveBtn = document.querySelector('.b-save');
+      if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving...';
+      }
+
       const vb=document.getElementById("validatedBy").value.trim();
       const validatedDate = document.getElementById("ValidatedDate").value || new Date().toISOString().slice(0,10);
       const payload={
@@ -1982,17 +2000,31 @@ function goContacts(){
         "Lead Ranking":rank,
         "Validated By":vb,"Validated Date":validatedDate
       };
+
+      const saveToken = ++currentSaveToken;
+      saveInFlight = true;
+      lastSavedSignature = JSON.stringify({index: currentIndex, payload});
+
       fetch(`/save/${currentIndex}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})
         .then(r=>r.json()).then(data=>{
+          if (saveToken !== currentSaveToken) return;
           loadSidebar();
-          // Find the next row in the filtered queue
           const currentQueuePos = filteredQueueIndices.indexOf(currentIndex);
           if (currentQueuePos >= 0 && currentQueuePos < filteredQueueIndices.length - 1) {
             const nextIdx = filteredQueueIndices[currentQueuePos + 1];
             loadRow(nextIdx);
           } else {
-            // No more rows in filtered queue
             loadRow(currentIndex + 1);
+          }
+        }).catch(()=>{
+          if (saveToken === currentSaveToken) saveInFlight = false;
+        }).finally(()=>{
+          if (saveToken === currentSaveToken) {
+            saveInFlight = false;
+            if (saveBtn) {
+              saveBtn.disabled = false;
+              saveBtn.textContent = 'Save & Next →';
+            }
           }
         });
     }
@@ -2101,18 +2133,27 @@ function goContacts(){
     }
 
     function autoSave(){
-      if(totalRows===0) return;
+      if(totalRows===0 || saveInFlight || currentIndex === undefined || currentIndex === null) return;
       const payload=getCurrentPayload();
       if(!payload) return;
+
+      const signature = JSON.stringify({index: currentIndex, payload});
+      if (lastSavedSignature === signature) return;
+
+      const saveToken = ++currentSaveToken;
+      saveInFlight = true;
       fetch(`/save/${currentIndex}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})
         .then(r=>r.json()).then(data=>{
+          if (saveToken !== currentSaveToken) return;
+          lastSavedSignature = signature;
           document.getElementById('sidebarStats').textContent=`${data.done_count} / ${totalRows}`;
-        });
+        }).catch(()=>{}).finally(()=>{ if (saveToken === currentSaveToken) saveInFlight = false; });
     }
 
     setInterval(autoSave, 30000);
 
     window.addEventListener('beforeunload', function(){
+      if (saveInFlight) return;
       const payload=getCurrentPayload();
       if(!payload) return;
       const blob=new Blob([JSON.stringify(payload)],{type:'application/json'});
